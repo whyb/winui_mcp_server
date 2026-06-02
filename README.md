@@ -22,39 +22,34 @@ Every tool returns structured JSON: `{"success": bool, "message": str, "data": d
 
 - **Windows 10/11**
 - **Python 3.10+**
+- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager (`pip install uv`)
 
 ## Setup
 
-### Option A: Conda (recommended if you already use Conda)
+### Install uv (if not already installed)
+
+```bash
+pip install uv
+```
+
+### Install the package
 
 ```bash
 git clone https://github.com/your-username/winui_mcp_server.git
 cd winui_mcp_server
 
-conda create -n winui_mcp_server python=3.11 -y
-conda activate winui_mcp_server
-pip install -r requirements.txt
+uv sync
 ```
 
-### Option B: pip / venv (lighter weight)
+Or install directly from PyPI (once published):
 
 ```bash
-git clone https://github.com/your-username/winui_mcp_server.git
-cd winui_mcp_server
-
-python -m venv .venv
-.venv\Scripts\activate        # Windows CMD
-# .venv\Scripts\Activate.ps1  # PowerShell
-pip install -e .
+uv tool install winui-mcp-server
 ```
-
-This installs the `winui-mcp` command globally in the venv.
 
 ## Install as MCP Server
 
 The server runs via **stdio** transport. Below are configuration instructions for every major agent client.
-
-> **Note on paths:** Replace `D:/codes/github/winui_mcp_server/mcp_server.py` with the actual absolute path on your machine. Use forward slashes `/` even on Windows.
 
 ---
 
@@ -66,26 +61,14 @@ Add to your project's `.claude/settings.json` or global `~/.claude/settings.json
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
 ```
 
-If you used `pip install -e .`, you can simplify to:
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "D:/codes/github/winui_mcp_server/.venv/Scripts/winui-mcp.exe"
-    }
-  }
-}
-```
-
-Then restart Claude Code. The `winui` tools will appear in your tool list.
+Restart Claude Code. The `winui` tools will appear in your tool list.
 
 ---
 
@@ -97,8 +80,8 @@ In your Codex project, create or edit `.codex/config.json`:
 {
   "mcp_servers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -118,8 +101,8 @@ Restart Codex to pick up the new server.
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"],
+      "command": "uvx",
+      "args": ["winui-mcp-server"],
       "disabled": false
     }
   }
@@ -140,8 +123,8 @@ Edit `~/.opencode/config.json`:
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -158,8 +141,8 @@ Edit `~/.opencode/config.json`:
 ```json
 {
   "winui": {
-    "command": "conda",
-    "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+    "command": "uvx",
+    "args": ["winui-mcp-server"]
   }
 }
 ```
@@ -176,8 +159,8 @@ Edit your Antigravity MCP configuration file:
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -193,8 +176,8 @@ GitHub Copilot supports MCP in agent mode. Add to your VS Code `settings.json`:
 {
   "github.copilot.chat.mcp.servers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -214,8 +197,8 @@ Edit your Qoder MCP settings:
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -231,8 +214,8 @@ Edit your CodeBuddy MCP configuration:
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -248,8 +231,8 @@ Edit `.cursor/mcp.json` in your project or `~/.cursor/mcp.json` globally:
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -265,8 +248,8 @@ Edit `~/.codeium/windsurf/mcp_config.json`:
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -278,22 +261,11 @@ Edit `~/.codeium/windsurf/mcp_config.json`:
 
 This server uses **stdio** transport and follows the standard MCP protocol. For any client that supports MCP:
 
-**Using Conda:**
-
 | Property | Value |
 |----------|-------|
 | Transport | `stdio` |
-| Command | `conda` |
-| Args | `["run", "-n", "winui_mcp_server", "python", "<path>/mcp_server.py"]` |
-| Server name | `winui` |
-
-**Using pip install (venv):**
-
-| Property | Value |
-|----------|-------|
-| Transport | `stdio` |
-| Command | `<path>/.venv/Scripts/winui-mcp.exe` |
-| Args | `[]` |
+| Command | `uvx` |
+| Args | `["winui-mcp-server"]` |
 | Server name | `winui` |
 
 ## Available Tools (26)
@@ -356,31 +328,31 @@ After installing the MCP server, just ask your agent:
 
 ```bash
 # List all windows
-python cli_gateway.py list-windows
+uv run python cli_gateway.py list-windows
 
 # Explore Notepad's UI
-python cli_gateway.py --window "Notepad" describe
-python cli_gateway.py --window "Notepad" dump-tree --depth 3
+uv run python cli_gateway.py --window "Notepad" describe
+uv run python cli_gateway.py --window "Notepad" dump-tree --depth 3
 
 # Find controls without clicking
-python cli_gateway.py --window "Notepad" find --name "Save"
+uv run python cli_gateway.py --window "Notepad" find --name "Save"
 
 # Interact
-python cli_gateway.py --window "Notepad" click --name "Save"
-python cli_gateway.py --window "Notepad" type --text "Hello World"
-python cli_gateway.py --window "Notepad" hotkey --keys "Ctrl+s"
+uv run python cli_gateway.py --window "Notepad" click --name "Save"
+uv run python cli_gateway.py --window "Notepad" type --text "Hello World"
+uv run python cli_gateway.py --window "Notepad" hotkey --keys "Ctrl+s"
 
 # Read text from a label
-python cli_gateway.py --window "Notepad" get-text --name "Status"
+uv run python cli_gateway.py --window "Notepad" get-text --name "Status"
 
 # Wait for a control
-python cli_gateway.py --window "MyApp" wait-for --name "Loading" --timeout 15 --disappear
+uv run python cli_gateway.py --window "MyApp" wait-for --name "Loading" --timeout 15 --disappear
 
 # Focus a window
-python cli_gateway.py --window "Notepad" focus
+uv run python cli_gateway.py --window "Notepad" focus
 
 # Launch Accessibility Insights for visual inspection
-python cli_gateway.py inspect
+uv run python cli_gateway.py inspect
 ```
 
 ### Python Script (multi-step workflows)
@@ -414,7 +386,7 @@ cli_gateway.py         CLI interface — single-command automation
 driver.py              Core UIA engine — window binding, element resolution, driver cache
 skills_library.py      Skill primitives — click, type, scroll, toggle, wait, find, etc.
 config.py              Project constants
-pyproject.toml         Package metadata (pip install support)
+pyproject.toml         Package metadata (pip/uv install support)
 ```
 
 ## License

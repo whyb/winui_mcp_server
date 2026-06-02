@@ -22,39 +22,34 @@
 
 - **Windows 10/11**
 - **Python 3.10+**
+- **[uv](https://docs.astral.sh/uv/)** — 快速 Python 包管理器（`pip install uv`）
 
 ## 安装步骤
 
-### 方案 A：Conda（推荐已有 Conda 的用户使用）
+### 安装 uv（如果尚未安装）
+
+```bash
+pip install uv
+```
+
+### 安装包
 
 ```bash
 git clone https://github.com/your-username/winui_mcp_server.git
 cd winui_mcp_server
 
-conda create -n winui_mcp_server python=3.11 -y
-conda activate winui_mcp_server
-pip install -r requirements.txt
+uv sync
 ```
 
-### 方案 B：pip / venv（更轻量）
+或直接从 PyPI 安装（发布后）：
 
 ```bash
-git clone https://github.com/your-username/winui_mcp_server.git
-cd winui_mcp_server
-
-python -m venv .venv
-.venv\Scripts\activate        # Windows CMD
-# .venv\Scripts\Activate.ps1  # PowerShell
-pip install -e .
+uv tool install winui-mcp-server
 ```
-
-这会在 venv 中安装 `winui-mcp` 命令。
 
 ## 安装为 MCP 服务器
 
 服务器通过 **stdio** 传输协议运行。以下是各大主流智能体客户端的配置说明。
-
-> **路径说明：** 将 `D:/codes/github/winui_mcp_server/mcp_server.py` 替换为您机器上的实际绝对路径。即使在 Windows 上也请使用正斜杠 `/`。
 
 ---
 
@@ -66,20 +61,8 @@ pip install -e .
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
-    }
-  }
-}
-```
-
-如果使用 `pip install -e .`，可以简化为：
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "D:/codes/github/winui_mcp_server/.venv/Scripts/winui-mcp.exe"
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -97,8 +80,8 @@ pip install -e .
 {
   "mcp_servers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -118,8 +101,8 @@ pip install -e .
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"],
+      "command": "uvx",
+      "args": ["winui-mcp-server"],
       "disabled": false
     }
   }
@@ -140,8 +123,8 @@ pip install -e .
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -158,8 +141,8 @@ pip install -e .
 ```json
 {
   "winui": {
-    "command": "conda",
-    "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+    "command": "uvx",
+    "args": ["winui-mcp-server"]
   }
 }
 ```
@@ -176,8 +159,8 @@ pip install -e .
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -193,8 +176,8 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 {
   "github.copilot.chat.mcp.servers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -214,8 +197,8 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -231,8 +214,8 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -248,8 +231,8 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -265,8 +248,8 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 {
   "mcpServers": {
     "winui": {
-      "command": "conda",
-      "args": ["run", "-n", "winui_mcp_server", "python", "D:/codes/github/winui_mcp_server/mcp_server.py"]
+      "command": "uvx",
+      "args": ["winui-mcp-server"]
     }
   }
 }
@@ -278,22 +261,11 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 
 本服务器使用 **stdio** 传输协议，遵循标准 MCP 协议规范。任何支持 MCP 的客户端均可使用：
 
-**使用 Conda：**
-
 | 属性 | 值 |
 |------|-----|
 | 传输协议 | `stdio` |
-| 命令 | `conda` |
-| 参数 | `["run", "-n", "winui_mcp_server", "python", "<路径>/mcp_server.py"]` |
-| 服务器名称 | `winui` |
-
-**使用 pip install（venv）：**
-
-| 属性 | 值 |
-|------|-----|
-| 传输协议 | `stdio` |
-| 命令 | `<路径>/.venv/Scripts/winui-mcp.exe` |
-| 参数 | `[]` |
+| 命令 | `uvx` |
+| 参数 | `["winui-mcp-server"]` |
 | 服务器名称 | `winui` |
 
 ## 可用工具（26 个）
@@ -356,31 +328,31 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 
 ```bash
 # 列出所有窗口
-python cli_gateway.py list-windows
+uv run python cli_gateway.py list-windows
 
 # 探索记事本的 UI 结构
-python cli_gateway.py --window "记事本" describe
-python cli_gateway.py --window "记事本" dump-tree --depth 3
+uv run python cli_gateway.py --window "记事本" describe
+uv run python cli_gateway.py --window "记事本" dump-tree --depth 3
 
 # 查找控件但不点击
-python cli_gateway.py --window "记事本" find --name "保存"
+uv run python cli_gateway.py --window "记事本" find --name "保存"
 
 # 交互操作
-python cli_gateway.py --window "记事本" click --name "保存"
-python cli_gateway.py --window "记事本" type --text "你好世界"
-python cli_gateway.py --window "记事本" hotkey --keys "Ctrl+s"
+uv run python cli_gateway.py --window "记事本" click --name "保存"
+uv run python cli_gateway.py --window "记事本" type --text "你好世界"
+uv run python cli_gateway.py --window "记事本" hotkey --keys "Ctrl+s"
 
 # 读取标签文本
-python cli_gateway.py --window "记事本" get-text --name "状态"
+uv run python cli_gateway.py --window "记事本" get-text --name "状态"
 
 # 等待控件消失
-python cli_gateway.py --window "MyApp" wait-for --name "加载中" --timeout 15 --disappear
+uv run python cli_gateway.py --window "MyApp" wait-for --name "加载中" --timeout 15 --disappear
 
 # 聚焦窗口
-python cli_gateway.py --window "记事本" focus
+uv run python cli_gateway.py --window "记事本" focus
 
 # 启动 Accessibility Insights 进行可视化检查
-python cli_gateway.py inspect
+uv run python cli_gateway.py inspect
 ```
 
 ### Python 脚本（多步骤工作流）
@@ -414,7 +386,7 @@ cli_gateway.py         命令行接口 — 单命令自动化
 driver.py              核心 UIA 引擎 — 窗口绑定、元素解析、驱动缓存
 skills_library.py      技能原语 — 点击、输入、滚动、切换、等待、查找等
 config.py              项目常量配置
-pyproject.toml         包元数据（支持 pip install）
+pyproject.toml         包元数据（支持 pip/uv install）
 ```
 
 ## 许可证
