@@ -227,6 +227,37 @@ COMMANDS = {
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
         ],
     },
+    "get-text": {
+        "func": lambda d, **kw: sk.get_text_by_name(d, kw["name"]),
+        "desc": "Read the Name text of a control (labels, headers, buttons)",
+        "args": [
+            {"name": "--name", "type": str, "required": True, "help": "Control name"},
+        ],
+    },
+    "find": {
+        "func": lambda d, **kw: sk.find_control(d, kw.get("name"), kw.get("class_name")),
+        "desc": "Find controls by name or class without clicking",
+        "args": [
+            {"name": "--name", "type": str, "default": None, "help": "Control name"},
+            {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
+        ],
+    },
+    "focus": {
+        "func": lambda d, **kw: sk.focus_window(d),
+        "desc": "Bring the window to the foreground",
+        "args": [],
+    },
+    "wait-for": {
+        "func": lambda d, **kw: sk.wait_for_control(d, kw.get("name"), kw.get("class_name"),
+                                                       kw.get("timeout", 10), kw.get("disappear", False)),
+        "desc": "Wait for a control to appear or disappear",
+        "args": [
+            {"name": "--name", "type": str, "default": None, "help": "Control name"},
+            {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
+            {"name": "--timeout", "type": float, "default": 10, "help": "Timeout in seconds (default 10)"},
+            {"name": "--disappear", "action": "store_true", "default": False, "help": "Wait for control to disappear instead of appear"},
+        ],
+    },
 }
 
 

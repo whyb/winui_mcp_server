@@ -625,3 +625,34 @@ class AppDriver:
         time.sleep(duration)
         ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # key up (KEYEVENTF_KEYUP)
         time.sleep(0.1)
+
+
+# ── Driver Cache ──
+
+_driver_cache: dict = {}
+
+
+def get_cached_driver(window_title: str = None, process_name: str = None,
+                      window_class: str = None, timeout: int = 5) -> AppDriver:
+    """Get or create a cached AppDriver. Avoids repeated window lookups."""
+    key = (window_title, process_name, window_class)
+    cached = _driver_cache.get(key)
+    if cached is not None:
+        try:
+            _ = cached.window  # Validate window still exists
+            return cached
+        except Exception:
+            del _driver_cache[key]
+    driver = AppDriver(
+        window_title=window_title,
+        process_name=process_name,
+        window_class=window_class,
+        timeout=timeout,
+    )
+    _driver_cache[key] = driver
+    return driver
+
+
+def clear_driver_cache() -> None:
+    """Clear all cached drivers."""
+    _driver_cache.clear()

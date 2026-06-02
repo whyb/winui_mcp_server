@@ -185,6 +185,77 @@ def read_slider(driver: AppDriver, slider_locator: tuple) -> dict:
         return _fail(f"Failed to read slider: {e}")
 
 
+def get_text_by_name(driver: AppDriver, name: str, partial: bool = True) -> dict:
+    """Read the Name text of a control (labels, headers, static text, etc.)."""
+    try:
+        matches = driver.find_by_name(name, partial=partial)
+        if not matches:
+            return _fail(f"No control found with name '{name}'")
+        ctrl = matches[0]
+        info = driver._get_control_info(ctrl)
+        text = _get_name(ctrl)
+        return _ok(f"Text read from '{info['name']}'", {
+            "text": text,
+            "control": info,
+        })
+    except Exception as e:
+        return _fail(f"Failed to get text from '{name}': {e}")
+
+
+def wait_for_control(driver: AppDriver, name: str = None, class_name: str = None,
+                     timeout: float = 10, disappear: bool = False) -> dict:
+    """Wait for a control to appear or disappear."""
+    import time as _time
+    deadline = _time.time() + timeout
+    while _time.time() < deadline:
+        if name:
+            matches = driver.find_by_name(name, partial=True)
+        elif class_name:
+            matches = driver.find_by_class(class_name, partial=True)
+        else:
+            return _fail("Must specify name or class_name")
+
+        found = len(matches) > 0
+        if disappear and not found:
+            return _ok(f"Control disappeared", {"name": name, "class": class_name})
+        if not disappear and found:
+            info = driver._get_control_info(matches[0])
+            return _ok(f"Control appeared", {"control": info})
+        _time.sleep(0.3)
+
+    target = name or class_name
+    action = "disappear" if disappear else "appear"
+    return _fail(f"Timed out waiting for '{target}' to {action} after {timeout}s")
+
+
+def find_control(driver: AppDriver, name: str = None, class_name: str = None,
+                 partial: bool = True) -> dict:
+    """Find controls and return their info without clicking."""
+    try:
+        if name:
+            matches = driver.find_by_name(name, partial=partial)
+        elif class_name:
+            matches = driver.find_by_class(class_name, partial=partial)
+        else:
+            return _fail("Must specify name or class_name")
+        if not matches:
+            return _fail(f"No control found")
+        results = [driver._get_control_info(c) for c in matches]
+        return _ok(f"Found {len(results)} control(s)", {"controls": results})
+    except Exception as e:
+        return _fail(f"Failed to find control: {e}")
+
+
+def focus_window(driver: AppDriver) -> dict:
+    """Explicitly bring the window to the foreground."""
+    try:
+        driver.focus()
+        win = driver.window
+        return _ok("Window focused", {"title": _get_name(win)})
+    except Exception as e:
+        return _fail(f"Failed to focus window: {e}")
+
+
 def list_sections(driver: AppDriver, content_locator: tuple) -> dict:
     """List all visible sections in a sidebar/panel."""
     try:
@@ -234,21 +305,6 @@ def set_named_slider(driver: AppDriver, param_map: dict, parameter: str, value: 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Dynamic UIA Discovery Skills (no profile needed)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-def list_windows(driver: AppDriver) -> dict:
-    """List all top-level windows on the desktop."""
-    try:
-        import uiautomation as auto
-        windows = []
-        for ctrl in auto.GetRootControl().GetChildren():
-            if ctrl.ControlTypeName == "WindowControl":
-                info = driver._get_control_info(ctrl)
-                info["handle"] = ctrl.NativeWindowHandle
-                windows.append(info)
-        return _ok(f"Found {len(windows)} windows", {"windows": windows})
-    except Exception as e:
-        return _fail(f"Failed to list windows: {e}")
 
 
 def discover_ui(driver: AppDriver, control_name: str = None,
@@ -304,12 +360,29 @@ def describe_children(driver: AppDriver, control_name: str = None,
         return _fail(f"Failed to describe children: {e}")
 
 
+def _hint_no_control(driver: AppDriver, target: str, by: str = "name") -> str:
+    """Build an error message with a hint about available controls."""
+    msg = f"No control found with {by} '{target}'."
+    try:
+        children = driver.window.GetChildren()
+        names = [_get_name(c) for c in children if _get_name(c)]
+        classes = [_get_class_name(c) for c in children if _get_class_name(c)]
+        if by == "name" and classes:
+            msg += f" Top-level classes: {classes[:8]}."
+        elif by == "class" and names:
+            msg += f" Top-level names: {names[:8]}."
+        msg += " Use 'discover' or 'describe' to explore the UI tree."
+    except Exception:
+        pass
+    return msg
+
+
 def click_by_name(driver: AppDriver, name: str, partial: bool = True) -> dict:
     """Click a control found by its Name attribute. Searches all descendants."""
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
-            return _fail(f"No control found with name '{name}'")
+            return _fail(_hint_no_control(driver, name, "name"))
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         driver.click_control(ctrl)
@@ -324,7 +397,7 @@ def click_by_class(driver: AppDriver, class_name: str, index: int = 0,
     try:
         matches = driver.find_by_class(class_name, partial=partial)
         if not matches:
-            return _fail(f"No control found with class '{class_name}'")
+            return _fail(_hint_no_control(driver, class_name, "class"))
         if index >= len(matches):
             return _fail(f"Only {len(matches)} controls with class '{class_name}', wanted index {index}")
         ctrl = matches[index]
@@ -341,7 +414,7 @@ def toggle_by_name(driver: AppDriver, name: str, enabled: bool = True,
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
-            return _fail(f"No control found with name '{name}'")
+            return _fail(_hint_no_control(driver, name, "name"))
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         driver.toggle_checkbox_by_control(ctrl, enabled)
@@ -357,12 +430,14 @@ def type_in(driver: AppDriver, text: str, control_name: str = None,
         ctrl = None
         if control_name:
             matches = driver.find_by_name(control_name, partial=True)
-            if matches:
-                ctrl = matches[0]
+            if not matches:
+                return _fail(_hint_no_control(driver, control_name, "name"))
+            ctrl = matches[0]
         elif control_class:
             matches = driver.find_by_class(control_class, partial=True)
-            if matches:
-                ctrl = matches[0]
+            if not matches:
+                return _fail(_hint_no_control(driver, control_class, "class"))
+            ctrl = matches[0]
 
         driver.type_text(text, ctrl)
         target_desc = _get_name(ctrl) if ctrl else "focused element"
@@ -383,7 +458,8 @@ def select_in_combo(driver: AppDriver, item_text: str, combo_name: str = None,
             return _fail("Must specify combo_name or combo_class")
 
         if not matches:
-            return _fail(f"Combobox not found")
+            target = combo_name or combo_class
+            return _fail(_hint_no_control(driver, target, "name" if combo_name else "class"))
 
         if combo_index >= len(matches):
             return _fail(f"Only {len(matches)} comboboxes found, wanted index {combo_index}")
@@ -429,7 +505,7 @@ def set_value_by_name(driver: AppDriver, name: str, value: str,
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
-            return _fail(f"No control found with name '{name}'")
+            return _fail(_hint_no_control(driver, name, "name"))
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         try:
@@ -452,7 +528,7 @@ def get_value_by_name(driver: AppDriver, name: str,
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
-            return _fail(f"No control found with name '{name}'")
+            return _fail(_hint_no_control(driver, name, "name"))
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         value = ""
@@ -478,7 +554,7 @@ def double_click_by_name(driver: AppDriver, name: str, partial: bool = True) -> 
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
-            return _fail(f"No control found with name '{name}'")
+            return _fail(_hint_no_control(driver, name, "name"))
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         driver.double_click_control(ctrl)
@@ -493,7 +569,7 @@ def double_click_by_class(driver: AppDriver, class_name: str, index: int = 0,
     try:
         matches = driver.find_by_class(class_name, partial=partial)
         if not matches:
-            return _fail(f"No control found with class '{class_name}'")
+            return _fail(_hint_no_control(driver, class_name, "class"))
         if index >= len(matches):
             return _fail(f"Only {len(matches)} controls with class '{class_name}', wanted index {index}")
         ctrl = matches[index]
@@ -509,7 +585,7 @@ def right_click_by_name(driver: AppDriver, name: str, partial: bool = True) -> d
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
-            return _fail(f"No control found with name '{name}'")
+            return _fail(_hint_no_control(driver, name, "name"))
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         driver.right_click_control(ctrl)
@@ -524,7 +600,7 @@ def right_click_by_class(driver: AppDriver, class_name: str, index: int = 0,
     try:
         matches = driver.find_by_class(class_name, partial=partial)
         if not matches:
-            return _fail(f"No control found with class '{class_name}'")
+            return _fail(_hint_no_control(driver, class_name, "class"))
         if index >= len(matches):
             return _fail(f"Only {len(matches)} controls with class '{class_name}', wanted index {index}")
         ctrl = matches[index]
@@ -540,7 +616,7 @@ def hover_by_name(driver: AppDriver, name: str, partial: bool = True) -> dict:
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
-            return _fail(f"No control found with name '{name}'")
+            return _fail(_hint_no_control(driver, name, "name"))
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         driver.hover_control(ctrl)
@@ -555,7 +631,7 @@ def hover_by_class(driver: AppDriver, class_name: str, index: int = 0,
     try:
         matches = driver.find_by_class(class_name, partial=partial)
         if not matches:
-            return _fail(f"No control found with class '{class_name}'")
+            return _fail(_hint_no_control(driver, class_name, "class"))
         if index >= len(matches):
             return _fail(f"Only {len(matches)} controls with class '{class_name}', wanted index {index}")
         ctrl = matches[index]
@@ -574,7 +650,7 @@ def scroll_up_by_name(driver: AppDriver, name: str = None, count: int = 3,
         if name:
             matches = driver.find_by_name(name, partial=partial)
             if not matches:
-                return _fail(f"No control found with name '{name}'")
+                return _fail(_hint_no_control(driver, name, "name"))
             ctrl = matches[0]
         driver.scroll_up(ctrl, count)
         target = _get_name(ctrl) if ctrl else "window"
@@ -591,7 +667,7 @@ def scroll_down_by_name(driver: AppDriver, name: str = None, count: int = 3,
         if name:
             matches = driver.find_by_name(name, partial=partial)
             if not matches:
-                return _fail(f"No control found with name '{name}'")
+                return _fail(_hint_no_control(driver, name, "name"))
             ctrl = matches[0]
         driver.scroll_down(ctrl, count)
         target = _get_name(ctrl) if ctrl else "window"
@@ -654,7 +730,9 @@ def get_control_rect(driver: AppDriver, name: str = None, class_name: str = None
         else:
             return _fail("Must specify --name or --class")
         if not matches:
-            return _fail(f"No control found")
+            target = name or class_name
+            by = "name" if name else "class"
+            return _fail(_hint_no_control(driver, target, by))
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         return _ok(f"Rect of '{info['name']}'", {"control": info})
