@@ -24,6 +24,25 @@ def print_result(result: dict):
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
+def _toggle_handler(driver: AppDriver, kw: dict) -> dict:
+    """Handle toggle command: flip if no flag, or force --enable/--disable."""
+    if kw.get("enable"):
+        return sk.toggle_by_name(driver, kw["name"], True)
+    if kw.get("disable"):
+        return sk.toggle_by_name(driver, kw["name"], False)
+    # Neither flag: flip current state by reading ToggleState first
+    matches = driver.find_by_name(kw["name"], partial=True)
+    if not matches:
+        return sk._fail(sk._hint_no_control(driver, kw["name"], "name"))
+    ctrl = matches[0]
+    try:
+        current = ctrl.GetTogglePattern().ToggleState
+        new_state = not bool(current)
+    except Exception:
+        new_state = True  # Can't read state, assume off -> toggle on
+    return sk.toggle_by_name(driver, kw["name"], new_state)
+
+
 def make_driver(window_title: str = None, window_class: str = None,
                 process_name: str = None) -> AppDriver:
     """Create an AppDriver from --window or --processname args."""
@@ -78,12 +97,12 @@ COMMANDS = {
         ],
     },
     "toggle": {
-        "func": lambda d, **kw: sk.toggle_by_name(d, kw["name"], kw.get("enable", True)),
-        "desc": "Toggle a checkbox/switch by name",
+        "func": lambda d, **kw: _toggle_handler(d, kw),
+        "desc": "Toggle a checkbox/switch by name (default: flip current state)",
         "args": [
             {"name": "--name", "type": str, "required": True, "help": "Control name"},
-            {"name": "--enable", "action": "store_true", "default": None, "help": "Enable"},
-            {"name": "--no-enable", "action": "store_true", "default": None, "dest": "no_enable", "help": "Disable"},
+            {"name": "--enable", "action": "store_true", "default": None, "help": "Force checked state"},
+            {"name": "--disable", "action": "store_true", "default": None, "dest": "disable", "help": "Force unchecked state"},
         ],
     },
     "type": {
@@ -351,9 +370,6 @@ def main():
     args = parser.parse_args(filtered_argv)
     kwargs = {k: v for k, v in vars(args).items() if k != "action" and v is not None}
 
-    # Handle --enable/--no-enable for toggle
-    if "no_enable" in kwargs:
-        kwargs["enable"] = not kwargs.pop("no_enable")
 
     try:
         result = cmd["func"](driver, **kwargs)

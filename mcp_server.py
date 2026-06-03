@@ -15,7 +15,7 @@ Install in Claude Code settings.json:
 import json
 from mcp.server.fastmcp import FastMCP
 
-from driver import get_cached_driver, clear_driver_cache
+from driver import get_cached_driver
 import skills_library as sk
 
 mcp = FastMCP("winui")

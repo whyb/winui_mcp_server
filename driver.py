@@ -55,8 +55,8 @@ def _get_process_name(pid: int) -> str:
         ctypes.windll.kernel32.CloseHandle(h)
 
 
-def _find_windows_by_title(title: str, class_name: str = None,
-                           timeout: float = 5, fuzzy: bool = True) -> auto.WindowControl:
+def _find_window_by_title(title: str, class_name: str = None,
+                          timeout: float = 5, fuzzy: bool = True) -> auto.WindowControl:
     """
     Find a window by title.
     1. Try exact match via uiautomation Name=
@@ -93,7 +93,7 @@ def _find_windows_by_title(title: str, class_name: str = None,
     )
 
 
-def _find_windows_by_process(process_name: str, timeout: float = 5) -> auto.WindowControl:
+def _find_window_by_process(process_name: str, timeout: float = 5) -> auto.WindowControl:
     """Find the first visible top-level window belonging to a process name."""
     import time as _time
     deadline = _time.time() + timeout
@@ -208,9 +208,9 @@ class AppDriver:
         """Find and return the main application window.
         Priority: process_name > window_title (exact then fuzzy)."""
         if self._process_name:
-            return _find_windows_by_process(self._process_name, timeout=self._timeout)
+            return _find_window_by_process(self._process_name, timeout=self._timeout)
         if self._window_title:
-            return _find_windows_by_title(
+            return _find_window_by_title(
                 self._window_title, self._window_class,
                 timeout=self._timeout, fuzzy=True
             )
