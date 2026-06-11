@@ -1,5 +1,15 @@
 # WinUI MCP Server
 
+<p align="center">
+    <a href="https://pypi.org/project/winui-mcp-server">
+        <img src="https://badgen.net/pypi/v/winui-mcp-server?color=yellow" />
+    </a>
+    <a href="https://pypi.org/project/winui-mcp-server">
+    <a href="https://pypistats.org/packages/winui-mcp-server">
+        <img src="https://static.pepy.tech/badge/winui-mcp-server" />
+    </a>
+</p>
+
 > [中文文档](README.cn.md)
 
 An MCP (Model Context Protocol) server that enables AI agents to control **any Windows desktop application** through UI Automation. No screen coordinates needed — controls are located by their class hierarchy and names.
@@ -35,7 +45,7 @@ pip install uv
 ### Install the package
 
 ```bash
-git clone https://github.com/your-username/winui_mcp_server.git
+git clone https://github.com/whyb/winui_mcp_server.git
 cd winui_mcp_server
 
 uv sync
