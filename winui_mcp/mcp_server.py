@@ -22,7 +22,7 @@ mcp = FastMCP("winui")
 
 
 def _json(result: dict) -> str:
-    return json.dumps(result, indent=2, ensure_ascii=False)
+    return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

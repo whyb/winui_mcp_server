@@ -16,7 +16,7 @@ An MCP (Model Context Protocol) server that enables AI agents to control **any W
 
 ## What It Does
 
-This server exposes 26 tools that let your AI agent:
+This server exposes 25 tools that let your AI agent:
 
 - **Discover** — explore the UIA tree of any window to find controls
 - **Click / Double-click / Right-click / Hover** — interact with controls by name or class
@@ -278,18 +278,19 @@ This server uses **stdio** transport and follows the standard MCP protocol. For 
 | Args | `["winui-mcp-server"]` |
 | Server name | `winui` |
 
-## Available Tools (26)
+## Available Tools (25)
 
 | Category | Tool | Description |
 |----------|------|-------------|
 | **Window** | `list_windows` | List all top-level windows on the desktop |
 | | `get_window_state` | Get window position, size, minimized state |
 | | `focus_window` | Bring a window to the foreground |
-| **Discovery** | `discover` | Explore the UIA tree (summary view, default depth 2) |
+| | `reset_driver` | Clear cached window bindings |
+| **Discovery** | `discover` | Explore a bounded compact UIA tree (default depth 2) |
 | | `describe` | List direct children with class, name, patterns |
-| | `dump_tree` | Full UIA tree dump with detailed info (default depth 4) |
+| | `dump_tree` | Bounded detailed UIA tree dump (default depth 4) |
 | | `get_control_rect` | Get bounding rectangle of a control |
-| | `find_control` | Find controls by name/class without clicking (read-only) |
+| | `find_control` | Find a bounded page of controls by name/class |
 | **Mouse** | `click` | Click a control by name or class |
 | | `double_click` | Double-click a control |
 | | `right_click` | Right-click a control |

@@ -278,18 +278,19 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 | 参数 | `["winui-mcp-server"]` |
 | 服务器名称 | `winui` |
 
-## 可用工具（26 个）
+## 可用工具（25 个）
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
 | **窗口** | `list_windows` | 列出桌面上所有顶层窗口 |
 | | `get_window_state` | 获取窗口位置、大小、最小化状态 |
 | | `focus_window` | 将窗口置于前台并聚焦 |
-| **发现** | `discover` | 探索窗口的 UIA 树（摘要视图，默认深度 2） |
+| | `reset_driver` | 清除缓存的窗口绑定 |
+| **发现** | `discover` | 探索有节点上限的紧凑 UIA 树（默认深度 2） |
 | | `describe` | 列出直接子控件的类名、名称、支持的模式 |
-| | `dump_tree` | 完整 UIA 树转储，包含详细信息（默认深度 4） |
+| | `dump_tree` | 有节点上限的详细 UIA 树转储（默认深度 4） |
 | | `get_control_rect` | 获取控件的边界矩形 |
-| | `find_control` | 按名称/类名查找控件，返回信息但不点击（只读） |
+| | `find_control` | 按名称/类名分页查找控件 |
 | **鼠标** | `click` | 按名称或类名点击控件 |
 | | `double_click` | 双击控件 |
 | | `right_click` | 右键点击控件 |
