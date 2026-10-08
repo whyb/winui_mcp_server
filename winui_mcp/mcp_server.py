@@ -34,7 +34,7 @@ def _json(result: dict) -> str:
 def list_windows() -> str:
     """List all top-level windows on the desktop.
     Use this first to discover running applications and their window titles."""
-    from driver import AppDriver
+    from .driver import AppDriver
     driver = AppDriver.__new__(AppDriver)
     driver._window_title = None
     driver._process_name = None
@@ -108,6 +108,26 @@ def dump_tree(window_title: str = None, process_name: str = None,
 
 
 @mcp.tool()
+def ocr_scan(window_title: str = None, process_name: str = None,
+             window_class: str = None, depth: int = 4, max_nodes: int = 500,
+             min_det_confidence: float = 0.3,
+             min_text_confidence: float = 0.45,
+             max_lines: int = 0) -> str:
+    """OCR the window and bind recognized text to each UIA control.
+
+    Use this when accessible Name/Value text is missing, empty, or unreliable.
+    Every tree node includes a `ref`; pass that ref to click/double_click/
+    right_click/hover to operate the exact control. OCR text appears as
+    `ocr_text`, and the best available label is `effective_text`.
+    """
+    driver = get_cached_driver(window_title, process_name, window_class)
+    return _json(sk.ocr_scan(
+        driver, depth, max_nodes, min_det_confidence,
+        min_text_confidence, max_lines,
+    ))
+
+
+@mcp.tool()
 def get_control_rect(window_title: str = None, process_name: str = None,
                      window_class: str = None, name: str = None,
                      control_class: str = None) -> str:
@@ -142,10 +162,14 @@ def find_control(window_title: str = None, process_name: str = None,
 def click(window_title: str = None, process_name: str = None,
           window_class: str = None, name: str = None,
           control_class: str = None, index: int = 0,
-          partial: bool = True) -> str:
-    """Click a control by name or class name.
-    Use 'name' for substring match on control Name, or 'control_class' for ClassName match."""
+          partial: bool = True, ref: str = None) -> str:
+    """Click a control by ref, name, or class name.
+
+    Prefer `ref` from dump_tree/ocr_scan when controls share names or have no
+    accessible label."""
     driver = get_cached_driver(window_title, process_name, window_class)
+    if ref:
+        return _json(sk.click_ref(driver, ref, "click"))
     if name:
         return _json(sk.click_by_name(driver, name, partial, index))
     return _json(sk.click_by_class(driver, control_class, index, partial))
@@ -155,9 +179,11 @@ def click(window_title: str = None, process_name: str = None,
 def double_click(window_title: str = None, process_name: str = None,
                  window_class: str = None, name: str = None,
                  control_class: str = None, index: int = 0,
-                 partial: bool = True) -> str:
-    """Double-click a control by name or class name."""
+                 partial: bool = True, ref: str = None) -> str:
+    """Double-click a control by ref, name, or class name."""
     driver = get_cached_driver(window_title, process_name, window_class)
+    if ref:
+        return _json(sk.click_ref(driver, ref, "double_click"))
     if name:
         return _json(sk.double_click_by_name(driver, name, partial, index))
     return _json(sk.double_click_by_class(driver, control_class, index, partial))
@@ -167,9 +193,11 @@ def double_click(window_title: str = None, process_name: str = None,
 def right_click(window_title: str = None, process_name: str = None,
                 window_class: str = None, name: str = None,
                 control_class: str = None, index: int = 0,
-                partial: bool = True) -> str:
-    """Right-click a control by name or class name."""
+                partial: bool = True, ref: str = None) -> str:
+    """Right-click a control by ref, name, or class name."""
     driver = get_cached_driver(window_title, process_name, window_class)
+    if ref:
+        return _json(sk.click_ref(driver, ref, "right_click"))
     if name:
         return _json(sk.right_click_by_name(driver, name, partial, index))
     return _json(sk.right_click_by_class(driver, control_class, index, partial))
@@ -179,9 +207,11 @@ def right_click(window_title: str = None, process_name: str = None,
 def hover(window_title: str = None, process_name: str = None,
           window_class: str = None, name: str = None,
           control_class: str = None, index: int = 0,
-          partial: bool = True) -> str:
-    """Hover (move mouse to) a control by name or class name."""
+          partial: bool = True, ref: str = None) -> str:
+    """Hover over a control by ref, name, or class name."""
     driver = get_cached_driver(window_title, process_name, window_class)
+    if ref:
+        return _json(sk.click_ref(driver, ref, "hover"))
     if name:
         return _json(sk.hover_by_name(driver, name, partial, index))
     return _json(sk.hover_by_class(driver, control_class, index, partial))

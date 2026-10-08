@@ -12,13 +12,14 @@
 
 > [中文文档](README.cn.md)
 
-An MCP (Model Context Protocol) server that enables AI agents to control **any Windows desktop application** through UI Automation. No screen coordinates needed — controls are located by their class hierarchy and names.
+An MCP (Model Context Protocol) server that enables AI agents to control **any Windows desktop application** through UI Automation. No screen coordinates needed — controls are located by their class hierarchy, names, or OCR-derived text attached directly to each control.
 
 ## What It Does
 
-This server exposes 25 tools that let your AI agent:
+This server exposes 26 tools that let your AI agent:
 
 - **Discover** — explore the UIA tree of any window to find controls
+- **OCR bind** — recognize visible text and attach it to the correct UIA controls when accessible names are missing
 - **Click / Double-click / Right-click / Hover** — interact with controls by name or class
 - **Type / Send keys / Hotkeys** — keyboard input to any focused or targeted control
 - **Scroll** — scroll up/down on a control or window
@@ -33,6 +34,7 @@ Every tool returns structured JSON: `{"success": bool, "message": str, "data": d
 - **Windows 10/11**
 - **Python 3.10+**
 - **[uv](https://docs.astral.sh/uv/)** — fast Python package manager (`pip install uv`)
+- **Bundled PP-OCRv6 tiny models** — OCR runs locally through ONNX Runtime and OpenCV; no model download or cloud service is required
 
 ## Setup
 
@@ -84,17 +86,12 @@ Restart Claude Code. The `winui` tools will appear in your tool list.
 
 ### Codex (OpenAI)
 
-In your Codex project, create or edit `.codex/config.json`:
+In your Codex project, create or edit `.codex/config.toml`:
 
-```json
-{
-  "mcp_servers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
+```toml
+[mcp_servers.winui]
+command = "uvx"
+args = ["winui-mcp-server"]
 ```
 
 Restart Codex to pick up the new server.
@@ -278,7 +275,7 @@ This server uses **stdio** transport and follows the standard MCP protocol. For 
 | Args | `["winui-mcp-server"]` |
 | Server name | `winui` |
 
-## Available Tools (25)
+## Available Tools (26)
 
 | Category | Tool | Description |
 |----------|------|-------------|
@@ -289,12 +286,13 @@ This server uses **stdio** transport and follows the standard MCP protocol. For 
 | **Discovery** | `discover` | Explore a bounded compact UIA tree (default depth 2) |
 | | `describe` | List direct children with class, name, patterns |
 | | `dump_tree` | Bounded detailed UIA tree dump (default depth 4) |
+| | `ocr_scan` | OCR visible text and bind it to UIA tree nodes |
 | | `get_control_rect` | Get bounding rectangle of a control |
 | | `find_control` | Find a bounded page of controls by name/class |
-| **Mouse** | `click` | Click a control by name or class |
-| | `double_click` | Double-click a control |
-| | `right_click` | Right-click a control |
-| | `hover` | Move mouse to a control |
+| **Mouse** | `click` | Click a control by ref, name, or class |
+| | `double_click` | Double-click a control by ref, name, or class |
+| | `right_click` | Right-click a control by ref, name, or class |
+| | `hover` | Hover over a control by ref, name, or class |
 | **Scroll** | `scroll_up` | Scroll up on a control or window |
 | | `scroll_down` | Scroll down on a control or window |
 | **Keyboard** | `send_key` | Send a single key press |
@@ -313,6 +311,8 @@ This server uses **stdio** transport and follows the standard MCP protocol. For 
 - **`get_value` vs `get_text`**: `get_value` reads from input fields / spinboxes that support ValuePattern. `get_text` reads the Name property of any control (labels, buttons, headers). Use `get_text` for static text, `get_value` for editable fields.
 
 - **`discover` vs `dump_tree`**: `discover` shows a summary (class, name, type) at shallow depth — good for quick exploration. `dump_tree` goes deeper and includes rect, patterns, and visibility info — use when you need the full picture.
+
+- **`ocr_scan`**: captures the window, runs the bundled PP-OCRv6 tiny detector/recognizer, and binds each OCR line to the smallest visible UIA control containing it. Each node gains `ref`, `uia_text`, `ocr_text`, `ocr_confidence`, `effective_text`, and `text_source`. Pass a node `ref` to `click`, `double_click`, `right_click`, or `hover` to operate that exact control even when its accessible Name is empty. Re-run `ocr_scan` after the UI structure changes.
 
 - **`toggle`**: Pass `enable=true` to force checked, `enable=false` to force unchecked. Omit `enable` to flip the current state.
 
@@ -334,6 +334,7 @@ After installing the MCP server, just ask your agent:
 - "Toggle the Dark Mode checkbox in Settings"
 - "Wait for the loading spinner to disappear"
 - "Read the text of the status label"
+- "OCR this window, find the button that says Save, and click it"
 
 ### CLI (direct usage)
 
@@ -344,6 +345,10 @@ uv run python cli_gateway.py list-windows
 # Explore Notepad's UI
 uv run python cli_gateway.py --window "Notepad" describe
 uv run python cli_gateway.py --window "Notepad" dump-tree --depth 3
+
+# OCR and bind visible text to controls, then act by the returned ref
+uv run python cli_gateway.py --window "MyApp" ocr-scan --depth 5 --max-nodes 500
+uv run python cli_gateway.py --window "MyApp" click --ref "0.3.2.1"
 
 # Find controls without clicking
 uv run python cli_gateway.py --window "Notepad" find --name "Save"
@@ -369,13 +374,18 @@ uv run python cli_gateway.py inspect
 ### Python Script (multi-step workflows)
 
 ```python
-from driver import AppDriver
-import skills_library as sk
+from winui_mcp.driver import AppDriver
+from winui_mcp import skills_library as sk
 
 driver = AppDriver(window_title="Notepad")
 
 # Discover controls
 tree = sk.discover_ui(driver, max_depth=3)
+
+# OCR and bind visible labels to UIA nodes
+ocr_result = sk.ocr_scan(driver, max_depth=5, max_nodes=500)
+# Inspect tree nodes for effective_text/ocr_text, then act by ref:
+# sk.click_ref(driver, "0.3.2.1")
 
 # Find without clicking
 result = sk.find_control(driver, name="Save")
@@ -392,12 +402,17 @@ sk.wait_for_control(driver, name="Save As", timeout=5)
 ## Architecture
 
 ```
-mcp_server.py          MCP server — exposes all skills as MCP tools (with driver cache)
-cli_gateway.py         CLI interface — single-command automation
-driver.py              Core UIA engine — window binding, element resolution, driver cache
-skills_library.py      Skill primitives — click, type, scroll, toggle, wait, find, etc.
-config.py              Project constants
-pyproject.toml         Package metadata (pip/uv install support)
+winui_mcp/
+  mcp_server.py        MCP server — exposes all skills as MCP tools
+  cli_gateway.py       CLI interface — single-command automation
+  driver.py            Core UIA engine — window binding, refs, element resolution
+  skills_library.py    Skill primitives — click, type, OCR discovery, wait, find, etc.
+  capture.py           GDI window capture to OpenCV images
+  ocr.py               PP-OCRv6 ONNX detector/recognizer pipeline
+  ocr_pipeline.py      Spatial binding of OCR lines to UIA controls
+  config.py            Runtime paths and bundled model discovery
+  models/PP-OCRv6/     Bundled tiny detector, recognizer, and vocabulary
+pyproject.toml         Package metadata and dependencies
 ```
 
 ## License

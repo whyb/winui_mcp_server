@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "winui-mcp-server"
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP server for Windows UI Automation — control any Windows app from AI agents"
 readme = "README.md"
 license = {text = "MIT"}
@@ -12,6 +12,8 @@ requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]",
     "uiautomation",
+    "onnxruntime>=1.18",
+    "opencv-python>=4.8",
 ]
 
 [project.scripts]
@@ -23,6 +25,7 @@ packages = ["winui_mcp"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/winui_mcp",
+    "/references",
     "/README.md",
     "/README.cn.md",
     "/LICENSE",

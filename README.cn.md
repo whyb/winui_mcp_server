@@ -12,13 +12,14 @@
 
 > [English](README.md)
 
-一个 MCP（Model Context Protocol）服务器，让 AI 智能体能够通过 UI Automation 控制 **任意 Windows 桌面应用程序**。无需屏幕坐标 — 通过控件的类名层级和名称来定位。
+一个 MCP（Model Context Protocol）服务器，让 AI 智能体能够通过 UI Automation 控制 **任意 Windows 桌面应用程序**。无需屏幕坐标 — 通过控件的类名层级、名称，或绑定到控件上的 OCR 文本来定位。
 
 ## 功能介绍
 
 本服务器提供 26 个工具，让您的 AI 智能体可以：
 
 - **发现** — 探索任意窗口的 UIA 树，找到目标控件
+- **OCR 绑定** — 当控件缺失可访问名称时，识别可见文字并绑定到正确的 UIA 控件
 - **点击 / 双击 / 右键 / 悬停** — 按名称或类名与控件交互
 - **输入 / 按键 / 快捷键** — 向任意控件发送键盘输入
 - **滚动** — 在控件或窗口上上下滚动
@@ -33,6 +34,7 @@
 - **Windows 10/11**
 - **Python 3.10+**
 - **[uv](https://docs.astral.sh/uv/)** — 快速 Python 包管理器（`pip install uv`）
+- **内置 PP-OCRv6 tiny 模型** — OCR 完全通过 ONNX Runtime 和 OpenCV 在本地运行，无需下载模型或调用云端服务
 
 ## 安装步骤
 
@@ -84,17 +86,12 @@ uv tool install winui-mcp-server
 
 ### Codex (OpenAI)
 
-在 Codex 项目中创建或编辑 `.codex/config.json`：
+在 Codex 项目中创建或编辑 `.codex/config.toml`：
 
-```json
-{
-  "mcp_servers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
+```toml
+[mcp_servers.winui]
+command = "uvx"
+args = ["winui-mcp-server"]
 ```
 
 重启 Codex 以加载新服务器。
@@ -278,7 +275,7 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 | 参数 | `["winui-mcp-server"]` |
 | 服务器名称 | `winui` |
 
-## 可用工具（25 个）
+## 可用工具（26 个）
 
 | 类别 | 工具 | 说明 |
 |------|------|------|
@@ -289,12 +286,13 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 | **发现** | `discover` | 探索有节点上限的紧凑 UIA 树（默认深度 2） |
 | | `describe` | 列出直接子控件的类名、名称、支持的模式 |
 | | `dump_tree` | 有节点上限的详细 UIA 树转储（默认深度 4） |
+| | `ocr_scan` | 识别窗口文字并与 UIA 树节点绑定 |
 | | `get_control_rect` | 获取控件的边界矩形 |
 | | `find_control` | 按名称/类名分页查找控件 |
-| **鼠标** | `click` | 按名称或类名点击控件 |
-| | `double_click` | 双击控件 |
-| | `right_click` | 右键点击控件 |
-| | `hover` | 将鼠标移动到控件上 |
+| **鼠标** | `click` | 按 ref、名称或类名点击控件 |
+| | `double_click` | 按 ref、名称或类名双击控件 |
+| | `right_click` | 按 ref、名称或类名右键点击控件 |
+| | `hover` | 按 ref、名称或类名将鼠标移动到控件上 |
 | **滚动** | `scroll_up` | 在控件或窗口上向上滚动 |
 | | `scroll_down` | 在控件或窗口上向下滚动 |
 | **键盘** | `send_key` | 发送单个按键 |
@@ -313,6 +311,8 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 - **`get_value` 和 `get_text` 的区别**：`get_value` 读取支持 ValuePattern 的输入框/数值框的内容。`get_text` 读取任意控件的 Name 属性（标签、按钮、标题等）。静态文本用 `get_text`，可编辑字段用 `get_value`。
 
 - **`discover` 和 `dump_tree` 的区别**：`discover` 显示摘要信息（类名、名称、类型），深度较浅，适合快速浏览。`dump_tree` 更深更详细，包含边界矩形、支持的模式、可见性等信息，适合需要完整了解界面结构时使用。
+
+- **`ocr_scan`**：截取窗口，使用内置 PP-OCRv6 tiny 检测与识别模型执行 OCR，并把每条文字绑定到包含它的最小可见 UIA 控件。每个节点会得到 `ref`、`uia_text`、`ocr_text`、`ocr_confidence`、`effective_text` 和 `text_source`。把节点 `ref` 传给 `click`、`double_click`、`right_click` 或 `hover`，即使控件 Name 为空也能操作准确控件。界面结构变化后请重新执行 `ocr_scan`。
 
 - **`toggle`**：传 `enable=true` 强制设为勾选，`enable=false` 强制取消勾选。不传 `enable` 则翻转当前状态。
 
@@ -334,6 +334,7 @@ GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.j
 - "切换设置中的深色模式复选框"
 - "等待加载动画消失"
 - "读取状态标签的文本"
+- "对这个窗口做 OCR，找到写着保存的按钮并点击"
 
 ### 命令行（直接使用）
 
@@ -344,6 +345,10 @@ uv run python cli_gateway.py list-windows
 # 探索记事本的 UI 结构
 uv run python cli_gateway.py --window "记事本" describe
 uv run python cli_gateway.py --window "记事本" dump-tree --depth 3
+
+# OCR 并把可见文字绑定到控件，再用返回的 ref 操作
+uv run python cli_gateway.py --window "MyApp" ocr-scan --depth 5 --max-nodes 500
+uv run python cli_gateway.py --window "MyApp" click --ref "0.3.2.1"
 
 # 查找控件但不点击
 uv run python cli_gateway.py --window "记事本" find --name "保存"
@@ -369,13 +374,18 @@ uv run python cli_gateway.py inspect
 ### Python 脚本（多步骤工作流）
 
 ```python
-from driver import AppDriver
-import skills_library as sk
+from winui_mcp.driver import AppDriver
+from winui_mcp import skills_library as sk
 
 driver = AppDriver(window_title="记事本")
 
 # 发现控件
 tree = sk.discover_ui(driver, max_depth=3)
+
+# OCR 并把可见文字绑定到 UIA 节点
+ocr_result = sk.ocr_scan(driver, max_depth=5, max_nodes=500)
+# 检查树节点中的 effective_text/ocr_text，再用 ref 操作：
+# sk.click_ref(driver, "0.3.2.1")
 
 # 查找但不点击
 result = sk.find_control(driver, name="保存")
@@ -392,12 +402,17 @@ sk.wait_for_control(driver, name="另存为", timeout=5)
 ## 项目架构
 
 ```
-mcp_server.py          MCP 服务器 — 将所有技能暴露为 MCP 工具（含驱动缓存）
-cli_gateway.py         命令行接口 — 单命令自动化
-driver.py              核心 UIA 引擎 — 窗口绑定、元素解析、驱动缓存
-skills_library.py      技能原语 — 点击、输入、滚动、切换、等待、查找等
-config.py              项目常量配置
-pyproject.toml         包元数据（支持 pip/uv install）
+winui_mcp/
+  mcp_server.py        MCP 服务器 — 将所有技能暴露为 MCP 工具
+  cli_gateway.py       命令行接口 — 单命令自动化
+  driver.py            核心 UIA 引擎 — 窗口绑定、ref 解析、元素定位
+  skills_library.py    技能原语 — 点击、输入、OCR 发现、等待、查找等
+  capture.py           GDI 窗口截图并转换为 OpenCV 图像
+  ocr.py               PP-OCRv6 ONNX 检测与识别流水线
+  ocr_pipeline.py      OCR 文本与 UIA 控件的空间绑定
+  config.py            运行时路径与内置模型发现
+  models/PP-OCRv6/     内置 tiny 检测模型、识别模型和字典
+pyproject.toml         包元数据与依赖
 ```
 
 ## 许可证

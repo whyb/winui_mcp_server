@@ -95,14 +95,33 @@ COMMANDS = {
             {"name": "--max-nodes", "type": int, "default": 500, "help": "Maximum rendered nodes (default 500)"},
         ],
     },
+    "ocr-scan": {
+        "func": lambda d, **kw: sk.ocr_scan(
+            d, kw.get("depth", 4), kw.get("max_nodes", 500),
+            kw.get("min_det_confidence", 0.3),
+            kw.get("min_text_confidence", 0.45),
+            kw.get("max_lines", 0),
+        ),
+        "desc": "OCR the window and bind text to UIA control nodes",
+        "args": [
+            {"name": "--depth", "type": int, "default": 4, "help": "Tree depth (default 4)"},
+            {"name": "--max-nodes", "type": int, "default": 500, "help": "Maximum rendered nodes (default 500)"},
+            {"name": "--min-det-confidence", "type": float, "default": 0.3, "help": "Detection threshold (default 0.3)"},
+            {"name": "--min-text-confidence", "type": float, "default": 0.45, "help": "Recognition threshold (default 0.45)"},
+            {"name": "--max-lines", "type": int, "default": 0, "help": "Maximum lines, 0 means unlimited"},
+        ],
+    },
     "click": {
         "func": lambda d, **kw: (
+            sk.click_ref(d, kw["ref"], "click")
+            if kw.get("ref") else
             sk.click_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
             if kw.get("name") else
             sk.click_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
         ),
-        "desc": "Click a control by name or class",
+        "desc": "Click a control by ref, name, or class",
         "args": [
+            {"name": "--ref", "type": str, "default": None, "help": "Control ref from dump-tree/ocr-scan (e.g. 0.2.1)"},
             {"name": "--name", "type": str, "default": None, "help": "Control name (substring match)"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
@@ -175,12 +194,15 @@ COMMANDS = {
     # ── Mouse ──
     "double-click": {
         "func": lambda d, **kw: (
+            sk.click_ref(d, kw["ref"], "double_click")
+            if kw.get("ref") else
             sk.double_click_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
             if kw.get("name") else
             sk.double_click_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
         ),
         "desc": "Double-click a control by name or class",
         "args": [
+            {"name": "--ref", "type": str, "default": None, "help": "Control ref from dump-tree/ocr-scan"},
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
@@ -189,12 +211,15 @@ COMMANDS = {
     },
     "right-click": {
         "func": lambda d, **kw: (
+            sk.click_ref(d, kw["ref"], "right_click")
+            if kw.get("ref") else
             sk.right_click_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
             if kw.get("name") else
             sk.right_click_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
         ),
         "desc": "Right-click a control by name or class",
         "args": [
+            {"name": "--ref", "type": str, "default": None, "help": "Control ref from dump-tree/ocr-scan"},
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
@@ -203,12 +228,15 @@ COMMANDS = {
     },
     "hover": {
         "func": lambda d, **kw: (
+            sk.click_ref(d, kw["ref"], "hover")
+            if kw.get("ref") else
             sk.hover_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
             if kw.get("name") else
             sk.hover_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
         ),
         "desc": "Hover (move mouse to) a control by name or class",
         "args": [
+            {"name": "--ref", "type": str, "default": None, "help": "Control ref from dump-tree/ocr-scan"},
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},

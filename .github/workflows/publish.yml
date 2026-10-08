@@ -26,6 +26,9 @@ jobs:
             throw "Tag '$tag' does not match project version 'v$version'"
           }
 
+      - name: Run tests
+        run: uv run python -m unittest discover -s tests -v
+
       - name: Build package
         run: uv build
 

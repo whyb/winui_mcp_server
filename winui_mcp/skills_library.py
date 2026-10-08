@@ -6,7 +6,11 @@ Every skill returns {"success": bool, "message": str, "data": dict}.
 """
 import time
 import uiautomation as auto
+
+from .capture import CaptureError, capture_window
 from .driver import AppDriver, _get_name, _get_class_name, _read_value
+from .ocr import OCRError, get_ocr_engine
+from .ocr_pipeline import bind_ocr_lines, shift_ocr_lines
 
 
 def _ok(msg: str, data: dict = None, verified: bool = None) -> dict:
@@ -866,3 +870,102 @@ def get_control_rect(driver: AppDriver, name: str = None, class_name: str = None
         return _ok(f"Rect of '{info['name']}'", {"control": info})
     except Exception as e:
         return _fail(f"Failed to get rect: {e}")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# OCR Discovery & Annotated Tree
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _ocr_scan_impl(driver: AppDriver, max_depth: int = 4, max_nodes: int = 500,
+                   min_det_confidence: float = 0.3,
+                   min_text_confidence: float = 0.45,
+                   max_lines: int = 0) -> dict:
+    """Capture the bound window, OCR it, and bind lines to UIA nodes."""
+    try:
+        window = driver.window
+        try:
+            if window.IsMinimize():
+                window.Restore()
+                time.sleep(0.2)
+        except Exception:
+            pass
+        tree = driver.dump_tree(
+            window, max_depth=max_depth, detailed=True, max_nodes=max_nodes
+        )
+        hwnd = getattr(driver, "_hwnd", 0) or getattr(window, "NativeWindowHandle", 0)
+        capture = capture_window(hwnd)
+        engine = get_ocr_engine()
+        recognized = engine.recognize(
+            capture.image,
+            det_threshold=min_det_confidence,
+            min_text_confidence=min_text_confidence,
+            max_lines=max_lines,
+        )
+        lines = [line.as_dict() for line in recognized]
+        screen_lines = shift_ocr_lines(lines, (capture.left, capture.top))
+        stats, unbound = bind_ocr_lines(tree, screen_lines, (0, 0))
+        return _ok(
+            f"OCR scanned {stats.total} text line(s); {stats.bound} bound to controls",
+            {
+                "tree": tree,
+                "ocr_lines": screen_lines,
+                "unbound_lines": unbound,
+                "binding": stats.as_dict(),
+                "capture": {
+                    "left": capture.left,
+                    "top": capture.top,
+                    "width": capture.width,
+                    "height": capture.height,
+                },
+                "settings": {
+                    "max_depth": max_depth,
+                    "max_nodes": max_nodes,
+                    "min_det_confidence": min_det_confidence,
+                    "min_text_confidence": min_text_confidence,
+                },
+            },
+        )
+    except (CaptureError, OCRError) as exc:
+        return _fail(f"OCR scan failed: {exc}")
+    except Exception as exc:
+        return _fail(f"OCR scan failed: {exc}")
+
+
+def ocr_scan(driver: AppDriver, max_depth: int = 4, max_nodes: int = 500,
+             min_det_confidence: float = 0.3,
+             min_text_confidence: float = 0.45,
+             max_lines: int = 0) -> dict:
+    """Public OCR scan skill used by CLI and MCP."""
+    return _ocr_scan_impl(
+        driver,
+        max_depth=max_depth,
+        max_nodes=max_nodes,
+        min_det_confidence=min_det_confidence,
+        min_text_confidence=min_text_confidence,
+        max_lines=max_lines,
+    )
+
+
+def click_ref(driver: AppDriver, ref: str, action: str = "click") -> dict:
+    """Run a mouse action against a control tree reference from OCR/dump tree."""
+    try:
+        ctrl = driver.resolve_ref(ref)
+        info = driver._get_control_info(ctrl)
+        if action == "click":
+            driver.click_control(ctrl)
+        elif action == "double_click":
+            driver.double_click_control(ctrl)
+        elif action == "right_click":
+            driver.right_click_control(ctrl)
+        elif action == "hover":
+            driver.hover_control(ctrl)
+        else:
+            return _fail(f"Unsupported ref action: {action}")
+        return _ok(
+            f"{action.replace('_', ' ').title()} '{info.get('effective_text') or info.get('name') or ref}'",
+            {"control": info, "ref": ref, "action": action},
+            verified=False,
+        )
+    except Exception as exc:
+        return _fail(f"Failed to resolve control reference {ref!r}: {exc}")

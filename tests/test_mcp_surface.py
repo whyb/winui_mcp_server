@@ -8,8 +8,9 @@ class McpSurfaceTests(unittest.TestCase):
     def test_documented_tool_count_matches_server(self):
         tools = asyncio.run(mcp.list_tools())
         names = {tool.name for tool in tools}
-        self.assertEqual(len(tools), 25)
+        self.assertEqual(len(tools), 26)
         self.assertIn("reset_driver", names)
+        self.assertIn("ocr_scan", names)
 
     def test_json_output_is_compact(self):
         payload = _json({"success": True, "data": {"value": 1}})

@@ -338,6 +338,26 @@ def _is_control_actionable(control: auto.Control) -> bool:
         return False
 
 
+def _control_identity(control: auto.Control) -> tuple:
+    """Return a best-effort identity used for tree-reference lookup."""
+    try:
+        runtime_id = tuple(control.GetRuntimeId())
+        if runtime_id:
+            return ("runtime", runtime_id)
+    except Exception:
+        pass
+    handle = _get_native_handle(control)
+    if handle:
+        return ("handle", handle)
+    rect = None
+    try:
+        r = control.BoundingRectangle
+        rect = (r.left, r.top, r.right, r.bottom)
+    except Exception:
+        pass
+    return ("attrs", _get_class_name(control), _get_name(control), rect)
+
+
 def _control_signature(control: auto.Control) -> tuple:
     """Return a best-effort stable signature for wait polling."""
     runtime_id = None
@@ -487,6 +507,62 @@ class AppDriver:
         """Resolve a locator tuple to a live UIA control."""
         t = timeout if timeout is not None else self._timeout
         return resolve_locator_safe(self.window, locator, t)
+
+    def get_control_path(self, target: auto.Control,
+                         root: auto.Control = None) -> tuple:
+        """Return the child-index path from the window root to a control."""
+        if root is None:
+            root = self.window
+        if target is root:
+            return ()
+        target_identity = _control_identity(target)
+        found = {"path": None}
+        visited = set()
+
+        def walk(control, path, depth):
+            if found["path"] is not None or depth > 80:
+                return
+            identity = _control_identity(control)
+            if identity in visited:
+                return
+            visited.add(identity)
+            try:
+                children = control.GetChildren()
+            except Exception:
+                return
+            for index, child in enumerate(children):
+                child_path = path + (index,)
+                if child is target or _control_identity(child) == target_identity:
+                    found["path"] = child_path
+                    return
+                walk(child, child_path, depth + 1)
+                if found["path"] is not None:
+                    return
+
+        walk(root, (), 0)
+        return found["path"]
+
+    def resolve_ref(self, ref: str, timeout: float = None) -> auto.Control:
+        """Resolve a tree reference such as ``0.2.1`` to a live UIA control."""
+        if ref is None or str(ref).strip() == "":
+            raise ValueError("Control reference cannot be empty")
+        try:
+            parts = [int(part) for part in str(ref).strip().split(".")]
+        except ValueError as exc:
+            raise ValueError(f"Invalid control reference: {ref!r}") from exc
+        if not parts or parts[0] != 0:
+            raise ValueError("Control reference must start at the window root (0)")
+        target = self.window
+        for index in parts[1:]:
+            if index < 0:
+                raise ValueError("Control reference indexes must be non-negative")
+            children = target.GetChildren()
+            if index >= len(children):
+                raise LookupError(
+                    f"Control reference {ref!r} is stale: child {index} does not exist"
+                )
+            target = children[index]
+        return target
 
     def click(self, locator: tuple, timeout: float = None) -> None:
         """Click a control identified by locator."""
@@ -687,6 +763,9 @@ class AppDriver:
                 info["visible"] = None
             return info
 
+        value = _read_value(control)
+        if value is not None and value != info["name"]:
+            info["value"] = value
         try:
             rect = control.BoundingRectangle
             info["rect"] = {
@@ -727,18 +806,29 @@ class AppDriver:
                   detailed: bool = True, max_nodes: int = 200) -> dict:
         """Recursively dump a bounded UIA tree structure."""
         if control is None:
-            control = self.window
+            root = self.window
+            control = root
+            prefix = ()
+        else:
+            try:
+                root = self.window
+                prefix = self.get_control_path(control, root) or ()
+            except Exception:
+                prefix = ()
         counter = {"count": 0, "truncated": False}
-        tree = self._dump_tree(control, max_depth, detailed, max_nodes, 0, counter)
+        tree = self._dump_tree(
+            control, max_depth, detailed, max_nodes, 0, counter, prefix
+        )
         tree["node_count"] = counter["count"]
         tree["truncated"] = counter["truncated"]
         return tree
 
     def _dump_tree(self, control: auto.Control, max_depth: int, detailed: bool,
-                   max_nodes: int, depth: int, counter: dict) -> dict:
+                   max_nodes: int, depth: int, counter: dict, path: tuple) -> dict:
         counter["count"] += 1
         info = self._get_control_info(control, detailed=detailed)
         info["depth"] = depth
+        info["ref"] = ".".join(str(index) for index in (0,) + path)
         if depth >= max_depth:
             info["child_count"] = len(control.GetChildren())
             return info
@@ -751,7 +841,8 @@ class AppDriver:
                 info["omitted_children"] = len(children) - index
                 break
             rendered.append(self._dump_tree(
-                child, max_depth, detailed, max_nodes, depth + 1, counter
+                child, max_depth, detailed, max_nodes, depth + 1, counter,
+                path + (index,),
             ))
         info["children"] = rendered
         return info
