@@ -37,6 +37,7 @@ class WindowScopeTests(unittest.TestCase):
         app = AppDriver.__new__(AppDriver)
         app._window = main
         app._pid = 100
+        app._hwnd = main.NativeWindowHandle
         app._window_title = "App"
         app._window_class = None
         app._process_name = None

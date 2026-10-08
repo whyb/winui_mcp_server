@@ -265,6 +265,7 @@ class AppDriver:
         self._process_name = process_name
         self._window = None
         self._pid = 0
+        self._hwnd = 0
         self._timeout = timeout
 
     def find_main_window(self) -> auto.WindowControl:
@@ -279,12 +280,35 @@ class AppDriver:
             )
         raise RuntimeError("No window_title or process_name specified.")
 
+    def _remember_window(self, window: auto.WindowControl) -> None:
+        """Record the concrete window identity used by this driver."""
+        self._window = window
+        self._pid = _get_control_pid(window)
+        self._hwnd = _get_native_handle(window)
+
     @property
     def window(self) -> auto.WindowControl:
-        if self._window is None or not self._window.Exists(maxSearchSeconds=1):
-            self._window = self.find_main_window()
-            self._pid = _get_control_pid(self._window)
+        """Return the originally bound window; never silently retarget."""
+        if self._window is None:
+            self._remember_window(self.find_main_window())
+            return self._window
+        if not self._window.Exists(maxSearchSeconds=1):
+            raise RuntimeError(
+                "Bound window no longer exists; call reset_driver before retrying"
+            )
+        current_pid = _get_control_pid(self._window)
+        if self._pid and current_pid and current_pid != self._pid:
+            raise RuntimeError(
+                "Bound window handle now belongs to another process; "
+                "call reset_driver before retrying"
+            )
+        if not self._hwnd:
+            self._hwnd = _get_native_handle(self._window)
         return self._window
+
+    def window_identity(self) -> tuple:
+        """Return the stable identity for the currently bound window."""
+        return (self._pid, self._hwnd)
 
     def get_search_roots(self) -> list:
         """Return the main window and all same-process top-level surfaces."""
@@ -768,16 +792,21 @@ def get_cached_driver(window_title: str = None, process_name: str = None,
     cached = _driver_cache.get(key)
     if cached is not None:
         try:
-            _ = cached.window  # Validate window still exists
+            _ = cached.window
             return cached
-        except Exception:
-            del _driver_cache[key]
+        except Exception as e:
+            raise RuntimeError(
+                f"Cached window binding is no longer valid: {e}. "
+                "Call reset_driver before retrying."
+            ) from e
+
     driver = AppDriver(
         window_title=window_title,
         process_name=process_name,
         window_class=window_class,
         timeout=timeout,
     )
+    _ = driver.window
     _driver_cache[key] = driver
     return driver
 

@@ -15,7 +15,7 @@ Install in Claude Code settings.json:
 import json
 from mcp.server.fastmcp import FastMCP
 
-from driver import get_cached_driver
+from driver import clear_driver_cache, get_cached_driver
 import skills_library as sk
 
 mcp = FastMCP("winui")
@@ -59,6 +59,13 @@ def focus_window(window_title: str = None, process_name: str = None,
     """Bring a window to the foreground and give it focus."""
     driver = get_cached_driver(window_title, process_name, window_class)
     return _json(sk.focus_window(driver))
+
+
+@mcp.tool()
+def reset_driver() -> str:
+    """Clear cached window bindings, then bind again on the next call."""
+    clear_driver_cache()
+    return _json({"success": True, "message": "Driver cache reset", "data": {}})
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
