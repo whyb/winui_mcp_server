@@ -254,6 +254,25 @@ def _selection_matches_text(control: auto.Control, text: str):
     return any(wanted in name.casefold() for name in names)
 
 
+def _is_selectable_item(control: auto.Control) -> bool:
+    """Return True for controls that behave like list/menu/selection items."""
+    control_type = ""
+    try:
+        control_type = control.ControlTypeName or ""
+    except Exception:
+        pass
+    if control_type in {
+        "ListItemControl", "MenuItemControl", "TreeItemControl",
+        "DataItemControl", "ListControl", "MenuControl",
+    }:
+        return True
+    try:
+        control.GetSelectionItemPattern()
+        return True
+    except Exception:
+        return False
+
+
 def _is_control_actionable(control: auto.Control) -> bool:
     """Return True when a control is enabled, visible, and has a real size."""
     try:
@@ -471,7 +490,7 @@ class AppDriver:
         return self.select_combobox_item_by_control(ctrl, item_text)
 
     def select_combobox_item_by_control(self, ctrl: auto.Control, item_text: str):
-        """Select and verify a combobox item on an already resolved control."""
+        """Select and verify an item in a combo popup or descendant tree."""
         ctrl.Click()
         time.sleep(0.5)
 
@@ -481,25 +500,64 @@ class AppDriver:
         except Exception:
             pass
 
-        for item in ctrl.GetChildren():
-            if item_text.casefold() in _get_name(item).casefold():
-                item.Click()
-                time.sleep(0.3)
-                return self._verify_combobox_selection(ctrl, item_text)
-            try:
-                for sub in item.GetChildren():
-                    if item_text.casefold() in _get_name(sub).casefold():
-                        sub.Click()
-                        time.sleep(0.3)
-                        return self._verify_combobox_selection(ctrl, item_text)
-            except Exception:
-                pass
+        candidate = None
+        for attempt in range(5):
+            candidate = self._find_descendant_by_name(ctrl, item_text, max_depth=4)
+            if candidate is None:
+                candidate = self._find_popup_item(item_text, ctrl)
+            if candidate is not None:
+                break
+            if attempt < 4:
+                time.sleep(0.15)
+
+        if candidate is not None:
+            candidate.Click()
+            time.sleep(0.3)
+            return self._verify_combobox_selection(ctrl, item_text)
 
         try:
             ctrl.GetExpandCollapsePattern().Collapse()
         except Exception:
             ctrl.Click()
         return False
+
+    @staticmethod
+    def _find_descendant_by_name(root: auto.Control, text: str,
+                                 max_depth: int = 4, max_nodes: int = 200):
+        """Find an exact-then-partial matching descendant."""
+        wanted = text.casefold()
+        exact = []
+        fuzzy = []
+        queue = [(root, 0)]
+        visited = 0
+        while queue and visited < max_nodes:
+            control, depth = queue.pop(0)
+            if depth >= max_depth:
+                continue
+            try:
+                children = control.GetChildren()
+            except Exception:
+                continue
+            for child in children:
+                visited += 1
+                name = _get_name(child).casefold()
+                if name == wanted:
+                    exact.append(child)
+                elif wanted in name:
+                    fuzzy.append(child)
+                queue.append((child, depth + 1))
+                if visited >= max_nodes:
+                    break
+        return (exact + fuzzy)[0] if exact or fuzzy else None
+
+    def _find_popup_item(self, item_text: str, combo: auto.Control):
+        """Find a selectable item in a separate popup surface."""
+        for candidate in self.find_by_name(item_text, partial=True):
+            if candidate is combo:
+                continue
+            if _is_selectable_item(candidate):
+                return candidate
+        return None
 
     @staticmethod
     def _verify_combobox_selection(ctrl: auto.Control, item_text: str):
