@@ -11,7 +11,6 @@ Examples:
 """
 import sys
 import json
-import os
 import subprocess
 import argparse
 
@@ -325,10 +324,10 @@ COMMANDS = {
 def main():
     # ── inspect (launch Accessibility Insights) ──
     if len(sys.argv) >= 2 and sys.argv[1] == "inspect":
-        ai_path = config.ACCESSIBILITY_INSIGHTS_PATH
-        if not os.path.isfile(ai_path):
-            print(f"Error: Accessibility Insights not found at:")
-            print(f"  {ai_path}")
+        ai_path = config.find_accessibility_insights()
+        if not ai_path:
+            print("Error: Accessibility Insights executable was not found.")
+            print("Set ACCESSIBILITY_INSIGHTS_PATH or install Accessibility Insights for Windows.")
             sys.exit(1)
         print(f"Launching Accessibility Insights: {ai_path}")
         subprocess.Popen([ai_path])
