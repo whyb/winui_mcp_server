@@ -237,6 +237,7 @@ COMMANDS = {
         "func": lambda d, **kw: sk.list_windows(d),
         "desc": "List all top-level windows on the desktop",
         "args": [],
+        "target_required": False,
     },
     "get-rect": {
         "func": lambda d, **kw: sk.get_control_rect(d, kw.get("name"), kw.get("class_name")),
@@ -355,7 +356,11 @@ def main():
         # inspect handled above
         sys.exit(0)
 
-    driver = make_driver(window_title, window_class, process_name)
+    if cmd.get("target_required", True):
+        driver = make_driver(window_title, window_class, process_name)
+    else:
+        driver = AppDriver()
+
 
     # Parse command-specific args
     parser = argparse.ArgumentParser(prog=f"cli_gateway.py {action}", description=cmd["desc"])
