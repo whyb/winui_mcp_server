@@ -254,6 +254,25 @@ def _selection_matches_text(control: auto.Control, text: str):
     return any(wanted in name.casefold() for name in names)
 
 
+def _escape_sendkeys_text(text: str) -> str:
+    """Escape literal braces for uiautomation.SendKeys text input."""
+    return "".join("{{}" if ch == "{" else "{}}" if ch == "}" else ch for ch in text)
+
+
+def _resolve_virtual_key(key: str) -> int:
+    """Resolve character and special-key names to a virtual-key code."""
+    value = key.strip()
+    if len(value) >= 2 and value.startswith("{") and value.endswith("}"):
+        value = value[1:-1]
+    special = getattr(auto, "SpecialKeyNames", {})
+    vk = special.get(value.upper())
+    if vk is None:
+        vk = auto.CharToKeyCode(value)
+    if not vk:
+        raise ValueError(f"Unsupported key: {key!r}")
+    return vk
+
+
 def _is_selectable_item(control: auto.Control) -> bool:
     """Return True for controls that behave like list/menu/selection items."""
     control_type = ""
@@ -466,7 +485,7 @@ class AppDriver:
             time.sleep(0.1)
             ctrl.SendKeys("{Ctrl}a")
             time.sleep(0.05)
-            ctrl.SendKeys(value)
+            ctrl.SendKeys(_escape_sendkeys_text(value))
         time.sleep(0.2)
         actual = _read_value(ctrl)
         if actual is None:
@@ -842,7 +861,7 @@ class AppDriver:
                 pass
         else:
             self._ensure_process_foreground()
-        auto.SendKeys(text)
+        auto.SendKeys(_escape_sendkeys_text(text))
         time.sleep(0.2)
 
     def double_click_control(self, control: auto.Control) -> None:
@@ -894,11 +913,13 @@ class AppDriver:
     def long_press_key(self, key: str, duration: float = 1.0) -> None:
         """Hold a key down for duration seconds, then release."""
         self._ensure_process_foreground()
-        vk = auto.CharToKeyCode(key)
+        vk = _resolve_virtual_key(key)
         ctypes.windll.user32.keybd_event(vk, 0, 0, 0)  # key down
-        time.sleep(duration)
-        ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # key up (KEYEVENTF_KEYUP)
-        time.sleep(0.1)
+        try:
+            time.sleep(duration)
+        finally:
+            ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # key up
+            time.sleep(0.1)
 
 
 # ── Driver Cache ──
