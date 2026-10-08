@@ -254,6 +254,37 @@ def _selection_matches_text(control: auto.Control, text: str):
     return any(wanted in name.casefold() for name in names)
 
 
+def _is_control_actionable(control: auto.Control) -> bool:
+    """Return True when a control is enabled, visible, and has a real size."""
+    try:
+        if control.IsOffscreen or not control.IsEnabled:
+            return False
+    except Exception:
+        pass
+    try:
+        rect = control.BoundingRectangle
+        return rect.width() > 0 and rect.height() > 0
+    except Exception:
+        return False
+
+
+def _control_signature(control: auto.Control) -> tuple:
+    """Return a best-effort stable signature for wait polling."""
+    runtime_id = None
+    try:
+        runtime_id = tuple(control.GetRuntimeId())
+    except Exception:
+        pass
+    handle = _get_native_handle(control)
+    rect = None
+    try:
+        r = control.BoundingRectangle
+        rect = (r.left, r.top, r.right, r.bottom)
+    except Exception:
+        pass
+    return (runtime_id, handle, _get_class_name(control), _get_name(control), rect)
+
+
 class AppDriver:
     """High-level driver wrapping window binding and element resolution.
     Works with any Windows application — pass window_title, process_name, or both."""
@@ -372,6 +403,14 @@ class AppDriver:
                 time.sleep(0.2)
             except Exception:
                 pass
+
+    @staticmethod
+    def is_control_actionable(control: auto.Control) -> bool:
+        return _is_control_actionable(control)
+
+    @staticmethod
+    def control_signature(control: auto.Control) -> tuple:
+        return _control_signature(control)
 
     def resolve(self, locator: tuple, timeout: float = None) -> auto.Control:
         """Resolve a locator tuple to a live UIA control."""

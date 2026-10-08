@@ -240,29 +240,54 @@ def get_text_by_name(driver: AppDriver, name: str, partial: bool = True,
 
 
 def wait_for_control(driver: AppDriver, name: str = None, class_name: str = None,
-                     timeout: float = 10, disappear: bool = False) -> dict:
-    """Wait for a control to appear or disappear."""
+                     timeout: float = 10, disappear: bool = False,
+                     actionable: bool = True, stable: bool = True,
+                     partial: bool = True, poll_interval: float = 0.3) -> dict:
+    """Wait for an actionable control to appear/disappear with stable polling."""
     import time as _time
+
     deadline = _time.time() + timeout
+    last_signature = None
     while _time.time() < deadline:
         if name:
-            matches = driver.find_by_name(name, partial=True)
+            matches = driver.find_by_name(name, partial=partial)
         elif class_name:
-            matches = driver.find_by_class(class_name, partial=True)
+            matches = driver.find_by_class(class_name, partial=partial)
         else:
             return _fail("Must specify name or class_name")
 
-        found = len(matches) > 0
-        if disappear and not found:
-            return _ok(f"Control disappeared", {"name": name, "class": class_name})
-        if not disappear and found:
-            info = driver._get_control_info(matches[0])
-            return _ok(f"Control appeared", {"control": info})
-        _time.sleep(0.3)
+        if actionable:
+            matches = [control for control in matches if driver.is_control_actionable(control)]
+
+        if disappear and not matches:
+            return _ok("Control disappeared", {
+                "name": name,
+                "class": class_name,
+                "actionable": actionable,
+            }, verified=True)
+        if not disappear and matches:
+            control = matches[0]
+            signature = driver.control_signature(control)
+            if not stable or signature == last_signature:
+                info = driver._get_control_info(control)
+                return _ok("Control appeared", {
+                    "control": info,
+                    "actionable": actionable,
+                    "stable": stable,
+                }, verified=True)
+            last_signature = signature
+        else:
+            last_signature = None
+
+        _time.sleep(poll_interval)
 
     target = name or class_name
     action = "disappear" if disappear else "appear"
-    return _fail(f"Timed out waiting for '{target}' to {action} after {timeout}s")
+    return _fail(
+        f"Timed out waiting for '{target}' to {action} after {timeout}s",
+        {"actionable": actionable, "stable": stable, "partial": partial},
+        verified=False,
+    )
 
 
 def find_control(driver: AppDriver, name: str = None, class_name: str = None,

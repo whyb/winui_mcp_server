@@ -339,13 +339,16 @@ def combo_select(window_title: str = None, process_name: str = None,
 def wait_for(window_title: str = None, process_name: str = None,
              window_class: str = None, name: str = None,
              control_class: str = None, timeout: float = 10,
-             disappear: bool = False) -> str:
+             disappear: bool = False, actionable: bool = True,
+             stable: bool = True, partial: bool = True) -> str:
     """Wait for a control to appear or disappear.
     Useful for async UI loading, dialogs, or loading spinners.
     - disappear=False (default): wait until the control appears
     - disappear=True: wait until the control disappears"""
     driver = get_cached_driver(window_title, process_name, window_class)
-    return _json(sk.wait_for_control(driver, name, control_class, timeout, disappear))
+    return _json(sk.wait_for_control(
+        driver, name, control_class, timeout, disappear, actionable, stable, partial
+    ))
 
 
 def main():

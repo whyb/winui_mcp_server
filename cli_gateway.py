@@ -290,14 +290,20 @@ COMMANDS = {
         "args": [],
     },
     "wait-for": {
-        "func": lambda d, **kw: sk.wait_for_control(d, kw.get("name"), kw.get("class_name"),
-                                                       kw.get("timeout", 10), kw.get("disappear", False)),
+        "func": lambda d, **kw: sk.wait_for_control(
+            d, kw.get("name"), kw.get("class_name"), kw.get("timeout", 10),
+            kw.get("disappear", False), kw.get("actionable", True),
+            kw.get("stable", True), kw.get("partial", True)
+        ),
         "desc": "Wait for a control to appear or disappear",
         "args": [
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
             {"name": "--timeout", "type": float, "default": 10, "help": "Timeout in seconds (default 10)"},
             {"name": "--disappear", "action": "store_true", "default": False, "help": "Wait for control to disappear instead of appear"},
+            {"name": "--include-non-actionable", "action": "store_false", "dest": "actionable", "default": True, "help": "Include hidden or disabled controls"},
+            {"name": "--no-stable", "action": "store_false", "dest": "stable", "default": True, "help": "Return on the first matching sample"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name or class match"},
         ],
     },
 }
