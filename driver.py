@@ -335,6 +335,7 @@ class AppDriver:
         self._window = None
         self._pid = 0
         self._hwnd = 0
+        self._search_errors = []
         self._timeout = timeout
 
     def find_main_window(self) -> auto.WindowControl:
@@ -723,33 +724,31 @@ class AppDriver:
         info["children"] = rendered
         return info
 
+    def get_search_errors(self) -> list:
+        """Return errors skipped while traversing inaccessible branches."""
+        return list(self._search_errors[-20:])
+
+    def _record_search_error(self, control: auto.Control, error: Exception) -> None:
+        self._search_errors.append({
+            "class": _get_class_name(control),
+            "name": _get_name(control),
+            "error": str(error),
+        })
+
     def find_by_name(self, name: str, control: auto.Control = None,
                      partial: bool = False) -> list:
-        """Find controls by Name attribute (searches all descendants).
-        partial=True for substring match. Exact matches always come first."""
-        if control is None:
-            exact = []
-            fuzzy = []
-            for root in self.get_search_roots():
-                root_exact, root_fuzzy = self._find_by_name_split(name, root, partial)
-                exact.extend(root_exact)
-                fuzzy.extend(root_fuzzy)
+        """Find controls by Name, preserving matches from healthy branches."""
+        if control is not None:
+            exact, fuzzy = self._find_by_name_split(name, control, partial)
             return exact + fuzzy
+
+        self._search_errors = []
         exact = []
         fuzzy = []
-        try:
-            for child in control.GetChildren():
-                child_name = _get_name(child)
-                if child_name == name:
-                    exact.append(child)
-                elif partial and name.lower() in child_name.lower():
-                    fuzzy.append(child)
-                child_exact, child_fuzzy = self._find_by_name_split(
-                    name, child, partial)
-                exact.extend(child_exact)
-                fuzzy.extend(child_fuzzy)
-        except Exception:
-            pass
+        for root in self.get_search_roots():
+            root_exact, root_fuzzy = self._find_by_name_split(name, root, partial)
+            exact.extend(root_exact)
+            fuzzy.extend(root_fuzzy)
         return exact + fuzzy
 
     def _find_by_name_split(self, name: str, control: auto.Control,
@@ -759,8 +758,8 @@ class AppDriver:
             return ([], [])
         exact = []
         fuzzy = []
-        try:
-            for child in control.GetChildren():
+        for child in control.GetChildren():
+            try:
                 child_name = _get_name(child)
                 if child_name == name:
                     exact.append(child)
@@ -770,37 +769,24 @@ class AppDriver:
                     name, child, partial)
                 exact.extend(child_exact)
                 fuzzy.extend(child_fuzzy)
-        except Exception:
-            pass
+            except Exception as e:
+                self._record_search_error(child, e)
         return (exact, fuzzy)
 
     def find_by_class(self, class_name: str, control: auto.Control = None,
                       partial: bool = False) -> list:
-        """Find controls by ClassName (searches all descendants).
-        Exact matches always come first."""
-        if control is None:
-            exact = []
-            fuzzy = []
-            for root in self.get_search_roots():
-                root_exact, root_fuzzy = self._find_by_class_split(class_name, root, partial)
-                exact.extend(root_exact)
-                fuzzy.extend(root_fuzzy)
+        """Find controls by ClassName, preserving matches from healthy branches."""
+        if control is not None:
+            exact, fuzzy = self._find_by_class_split(class_name, control, partial)
             return exact + fuzzy
+
+        self._search_errors = []
         exact = []
         fuzzy = []
-        try:
-            for child in control.GetChildren():
-                child_class = _get_class_name(child)
-                if child_class == class_name:
-                    exact.append(child)
-                elif partial and class_name.lower() in child_class.lower():
-                    fuzzy.append(child)
-                child_exact, child_fuzzy = self._find_by_class_split(
-                    class_name, child, partial)
-                exact.extend(child_exact)
-                fuzzy.extend(child_fuzzy)
-        except Exception:
-            pass
+        for root in self.get_search_roots():
+            root_exact, root_fuzzy = self._find_by_class_split(class_name, root, partial)
+            exact.extend(root_exact)
+            fuzzy.extend(root_fuzzy)
         return exact + fuzzy
 
     def _find_by_class_split(self, class_name: str, control: auto.Control,
@@ -810,8 +796,8 @@ class AppDriver:
             return ([], [])
         exact = []
         fuzzy = []
-        try:
-            for child in control.GetChildren():
+        for child in control.GetChildren():
+            try:
                 child_class = _get_class_name(child)
                 if child_class == class_name:
                     exact.append(child)
@@ -821,28 +807,27 @@ class AppDriver:
                     class_name, child, partial)
                 exact.extend(child_exact)
                 fuzzy.extend(child_fuzzy)
-        except Exception:
-            pass
+            except Exception as e:
+                self._record_search_error(child, e)
         return (exact, fuzzy)
 
     def find_by_auto_id(self, auto_id: str, control: auto.Control = None) -> list:
-        """Find controls by AutomationId (searches all descendants)."""
+        """Find controls by AutomationId, preserving healthy branches."""
         if control is None:
+            self._search_errors = []
             results = []
             for root in self.get_search_roots():
                 results.extend(self.find_by_auto_id(auto_id, root))
             return results
+
         results = []
-        try:
-            for child in control.GetChildren():
-                try:
-                    if (child.AutomationId or "") == auto_id:
-                        results.append(child)
-                except Exception:
-                    pass
+        for child in control.GetChildren():
+            try:
+                if (child.AutomationId or "") == auto_id:
+                    results.append(child)
                 results.extend(self.find_by_auto_id(auto_id, child))
-        except Exception:
-            pass
+            except Exception as e:
+                self._record_search_error(child, e)
         return results
 
     def click_control(self, control: auto.Control) -> None:

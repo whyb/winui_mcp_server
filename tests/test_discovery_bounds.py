@@ -43,6 +43,9 @@ class _Driver:
     def find_by_name(self, name, partial=True):
         return self.matches
 
+    def get_search_errors(self):
+        return []
+
     def _get_control_info(self, control, detailed=True):
         return {"class": control.ClassName, "name": control.Name, "detailed": detailed}
 

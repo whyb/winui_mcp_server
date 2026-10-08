@@ -303,8 +303,12 @@ def find_control(driver: AppDriver, name: str = None, class_name: str = None,
             matches = driver.find_by_class(class_name, partial=partial)
         else:
             return _fail("Must specify name or class_name")
+        search_errors = driver.get_search_errors()
         if not matches:
-            return _fail("No control found")
+            message = "No control found"
+            if search_errors:
+                message += f"; inaccessible branches: {len(search_errors)}"
+            return _fail(message, {"search_errors": search_errors})
         page = matches[offset:offset + limit]
         results = [driver._get_control_info(c, detailed=False) for c in page]
         return _ok(f"Found {len(matches)} control(s)", {
@@ -313,6 +317,7 @@ def find_control(driver: AppDriver, name: str = None, class_name: str = None,
             "limit": limit,
             "returned": len(results),
             "truncated": offset + len(results) < len(matches),
+            "search_errors": search_errors,
             "controls": results,
         })
     except Exception as e:
