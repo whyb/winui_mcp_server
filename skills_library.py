@@ -6,15 +6,21 @@ Every skill returns {"success": bool, "message": str, "data": dict}.
 """
 import time
 import uiautomation as auto
-from driver import AppDriver, _get_name, _get_class_name
+from driver import AppDriver, _get_name, _get_class_name, _read_value
 
 
-def _ok(msg: str, data: dict = None) -> dict:
-    return {"success": True, "message": msg, "data": data or {}}
+def _ok(msg: str, data: dict = None, verified: bool = None) -> dict:
+    result = {"success": True, "message": msg, "data": data or {}}
+    if verified is not None:
+        result["verified"] = verified
+    return result
 
 
-def _fail(msg: str, data: dict = None) -> dict:
-    return {"success": False, "message": msg, "data": data or {}}
+def _fail(msg: str, data: dict = None, verified: bool = None) -> dict:
+    result = {"success": False, "message": msg, "data": data or {}}
+    if verified is not None:
+        result["verified"] = verified
+    return result
 
 
 def _get_slider_label_text(slider_group: auto.Control) -> str:
@@ -386,7 +392,11 @@ def click_by_name(driver: AppDriver, name: str, partial: bool = True) -> dict:
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         driver.click_control(ctrl)
-        return _ok(f"Clicked '{info['name']}' ({info['class']})", {"control": info})
+        return _ok(
+            f"Clicked '{info['name']}' ({info['class']}); state change not verified",
+            {"control": info},
+            verified=False,
+        )
     except Exception as e:
         return _fail(f"Failed to click '{name}': {e}")
 
@@ -403,7 +413,11 @@ def click_by_class(driver: AppDriver, class_name: str, index: int = 0,
         ctrl = matches[index]
         info = driver._get_control_info(ctrl)
         driver.click_control(ctrl)
-        return _ok(f"Clicked '{info['name']}' ({info['class']})", {"control": info})
+        return _ok(
+            f"Clicked '{info['name']}' ({info['class']}); state change not verified",
+            {"control": info},
+            verified=False,
+        )
     except Exception as e:
         return _fail(f"Failed to click: {e}")
 
@@ -417,8 +431,25 @@ def toggle_by_name(driver: AppDriver, name: str, enabled: bool = True,
             return _fail(_hint_no_control(driver, name, "name"))
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
-        driver.toggle_checkbox_by_control(ctrl, enabled)
-        return _ok(f"Toggled '{info['name']}' to {'on' if enabled else 'off'}", {"control": info})
+        state = driver.toggle_checkbox_by_control(ctrl, enabled)
+        data = {"control": info, "requested_state": bool(enabled), "actual_state": state}
+        if state is False:
+            return _fail(
+                f"Toggle state does not match requested state for '{info['name']}'",
+                data,
+                verified=True,
+            )
+        if state is None:
+            return _ok(
+                f"Toggle sent to '{info['name']}', state could not be verified",
+                data,
+                verified=False,
+            )
+        return _ok(
+            f"Toggled '{info['name']}' to {'on' if enabled else 'off'}",
+            data,
+            verified=True,
+        )
     except Exception as e:
         return _fail(f"Failed to toggle '{name}': {e}")
 
@@ -441,7 +472,18 @@ def type_in(driver: AppDriver, text: str, control_name: str = None,
 
         driver.type_text(text, ctrl)
         target_desc = _get_name(ctrl) if ctrl else "focused element"
-        return _ok(f"Typed text into '{target_desc}'")
+        verified = None
+        if ctrl is not None:
+            actual = _read_value(ctrl)
+            if actual is not None:
+                verified = text in actual
+        if verified is True:
+            return _ok(f"Typed text into '{target_desc}'", verified=True)
+        return _ok(
+            f"Typed text into '{target_desc}', resulting value could not be verified",
+            {"verified_value": verified},
+            verified=False,
+        )
     except Exception as e:
         return _fail(f"Failed to type text: {e}")
 
@@ -466,35 +508,17 @@ def select_in_combo(driver: AppDriver, item_text: str, combo_name: str = None,
 
         ctrl = matches[combo_index]
         info = driver._get_control_info(ctrl)
-
-        # Click to open, then search for item
-        ctrl.Click()
-        time.sleep(0.5)
-        try:
-            pattern = ctrl.GetExpandCollapsePattern()
-            pattern.Expand()
-            time.sleep(0.3)
-        except Exception:
-            pass
-
-        # Search children and grandchildren
-        for item in ctrl.GetChildren():
-            if item_text.lower() in _get_name(item).lower():
-                item.Click()
-                time.sleep(0.3)
-                return _ok(f"Selected '{item_text}' from '{info['name']}'")
-            for sub in item.GetChildren():
-                if item_text.lower() in _get_name(sub).lower():
-                    sub.Click()
-                    time.sleep(0.3)
-                    return _ok(f"Selected '{item_text}' from '{info['name']}'")
-
-        # Close if not found
-        try:
-            ctrl.GetExpandCollapsePattern().Collapse()
-        except Exception:
-            ctrl.Click()
-        return _fail(f"Item '{item_text}' not found in '{info['name']}'")
+        state = driver.select_combobox_item_by_control(ctrl, item_text)
+        data = {"control": info, "requested_item": item_text, "selected": state}
+        if state is False:
+            return _fail(f"Item '{item_text}' was not selected in '{info['name']}'", data, verified=True)
+        if state is None:
+            return _ok(
+                f"Selection sent to '{info['name']}', selection could not be verified",
+                data,
+                verified=False,
+            )
+        return _ok(f"Selected '{item_text}' from '{info['name']}'", data, verified=True)
     except Exception as e:
         return _fail(f"Failed to select from combobox: {e}")
 
@@ -508,16 +532,21 @@ def set_value_by_name(driver: AppDriver, name: str, value: str,
             return _fail(_hint_no_control(driver, name, "name"))
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
-        try:
-            ctrl.GetValuePattern().SetValue(value)
-        except Exception:
-            ctrl.Click()
-            time.sleep(0.1)
-            ctrl.SendKeys("{Ctrl}a")
-            time.sleep(0.05)
-            ctrl.SendKeys(value)
-        time.sleep(0.2)
-        return _ok(f"Set value '{value}' on '{info['name']}'", {"control": info})
+        state = driver.set_value_by_control(ctrl, value)
+        data = {"control": info, "requested_value": value, "verified_value": state}
+        if state is False:
+            return _fail(
+                f"Value did not change to '{value}' on '{info['name']}'",
+                data,
+                verified=True,
+            )
+        if state is None:
+            return _ok(
+                f"Value sent to '{info['name']}', value could not be verified",
+                data,
+                verified=False,
+            )
+        return _ok(f"Set value '{value}' on '{info['name']}'", data, verified=True)
     except Exception as e:
         return _fail(f"Failed to set value: {e}")
 
@@ -558,7 +587,11 @@ def double_click_by_name(driver: AppDriver, name: str, partial: bool = True) -> 
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         driver.double_click_control(ctrl)
-        return _ok(f"Double-clicked '{info['name']}' ({info['class']})", {"control": info})
+        return _ok(
+            f"Double-clicked '{info['name']}' ({info['class']}); state change not verified",
+            {"control": info},
+            verified=False,
+        )
     except Exception as e:
         return _fail(f"Failed to double-click '{name}': {e}")
 
@@ -575,7 +608,11 @@ def double_click_by_class(driver: AppDriver, class_name: str, index: int = 0,
         ctrl = matches[index]
         info = driver._get_control_info(ctrl)
         driver.double_click_control(ctrl)
-        return _ok(f"Double-clicked '{info['name']}' ({info['class']})", {"control": info})
+        return _ok(
+            f"Double-clicked '{info['name']}' ({info['class']}); state change not verified",
+            {"control": info},
+            verified=False,
+        )
     except Exception as e:
         return _fail(f"Failed to double-click: {e}")
 
@@ -589,7 +626,11 @@ def right_click_by_name(driver: AppDriver, name: str, partial: bool = True) -> d
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         driver.right_click_control(ctrl)
-        return _ok(f"Right-clicked '{info['name']}' ({info['class']})", {"control": info})
+        return _ok(
+            f"Right-clicked '{info['name']}' ({info['class']}); state change not verified",
+            {"control": info},
+            verified=False,
+        )
     except Exception as e:
         return _fail(f"Failed to right-click '{name}': {e}")
 
@@ -606,7 +647,11 @@ def right_click_by_class(driver: AppDriver, class_name: str, index: int = 0,
         ctrl = matches[index]
         info = driver._get_control_info(ctrl)
         driver.right_click_control(ctrl)
-        return _ok(f"Right-clicked '{info['name']}' ({info['class']})", {"control": info})
+        return _ok(
+            f"Right-clicked '{info['name']}' ({info['class']}); state change not verified",
+            {"control": info},
+            verified=False,
+        )
     except Exception as e:
         return _fail(f"Failed to right-click: {e}")
 
@@ -620,7 +665,11 @@ def hover_by_name(driver: AppDriver, name: str, partial: bool = True) -> dict:
         ctrl = matches[0]
         info = driver._get_control_info(ctrl)
         driver.hover_control(ctrl)
-        return _ok(f"Hovering over '{info['name']}' ({info['class']})", {"control": info})
+        return _ok(
+            f"Hovering over '{info['name']}' ({info['class']}); state change not verified",
+            {"control": info},
+            verified=False,
+        )
     except Exception as e:
         return _fail(f"Failed to hover '{name}': {e}")
 
@@ -637,7 +686,11 @@ def hover_by_class(driver: AppDriver, class_name: str, index: int = 0,
         ctrl = matches[index]
         info = driver._get_control_info(ctrl)
         driver.hover_control(ctrl)
-        return _ok(f"Hovering over '{info['name']}' ({info['class']})", {"control": info})
+        return _ok(
+            f"Hovering over '{info['name']}' ({info['class']}); state change not verified",
+            {"control": info},
+            verified=False,
+        )
     except Exception as e:
         return _fail(f"Failed to hover: {e}")
 
@@ -680,7 +733,7 @@ def send_key(driver: AppDriver, key: str) -> dict:
     """Send a single key press. E.g. '{Enter}', '{Escape}', '{Tab}', 'a'."""
     try:
         driver.send_key(key)
-        return _ok(f"Sent key '{key}'")
+        return _ok(f"Sent key '{key}'", verified=False)
     except Exception as e:
         return _fail(f"Failed to send key '{key}': {e}")
 
@@ -690,7 +743,7 @@ def send_hotkey(driver: AppDriver, keys: str) -> dict:
     try:
         parts = [k.strip() for k in keys.split("+")]
         driver.send_hotkey(*parts)
-        return _ok(f"Sent hotkey '{keys}'")
+        return _ok(f"Sent hotkey '{keys}'", verified=False)
     except Exception as e:
         return _fail(f"Failed to send hotkey '{keys}': {e}")
 
@@ -699,7 +752,7 @@ def long_press_key(driver: AppDriver, key: str, duration: float = 1.0) -> dict:
     """Hold a key down for duration seconds, then release."""
     try:
         driver.long_press_key(key, duration)
-        return _ok(f"Long-pressed '{key}' for {duration}s")
+        return _ok(f"Long-pressed '{key}' for {duration}s", verified=False)
     except Exception as e:
         return _fail(f"Failed to long-press '{key}': {e}")
 

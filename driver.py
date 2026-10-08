@@ -192,6 +192,47 @@ def get_all_children_by_class(control: auto.Control, class_name: str) -> list:
     return [c for c in control.GetChildren() if _get_class_name(c) == class_name]
 
 
+def _read_value(control: auto.Control):
+    """Read a ValuePattern value, or None when the pattern is unavailable."""
+    try:
+        return control.GetValuePattern().Value
+    except Exception:
+        return None
+
+
+def _read_toggle_state(control: auto.Control):
+    """Read a TogglePattern state. Returns True/False, or None if unknown."""
+    try:
+        state = control.GetTogglePattern().ToggleState
+        if state == 2:
+            return None
+        return state == 1
+    except Exception:
+        return None
+
+
+def _read_selected_names(control: auto.Control):
+    """Read selected item names, falling back to the control value."""
+    try:
+        selected = control.GetSelectionPattern().GetSelection()
+        return [_get_name(item) for item in selected]
+    except Exception:
+        pass
+    value = _read_value(control)
+    if value is not None:
+        return [value]
+    return None
+
+
+def _selection_matches_text(control: auto.Control, text: str):
+    """Return whether the current selection matches text, or None if unknown."""
+    names = _read_selected_names(control)
+    if names is None:
+        return None
+    wanted = text.casefold()
+    return any(wanted in name.casefold() for name in names)
+
+
 class AppDriver:
     """High-level driver wrapping window binding and element resolution.
     Works with any Windows application — pass window_title, process_name, or both."""
@@ -263,13 +304,16 @@ class AppDriver:
             ctrl.Click()
         time.sleep(0.2)
 
-    def set_value(self, locator: tuple, value: str, timeout: float = None) -> None:
-        """Set value on an edit control via ValuePattern or direct typing."""
+    def set_value(self, locator: tuple, value: str, timeout: float = None):
+        """Set an edit control value and return verification state."""
         self.focus()
         ctrl = self.resolve(locator, timeout)
+        return self.set_value_by_control(ctrl, value)
+
+    def set_value_by_control(self, ctrl: auto.Control, value: str):
+        """Set a control value. Returns True/False, or None if unverifiable."""
         try:
-            pattern = ctrl.GetValuePattern()
-            pattern.SetValue(value)
+            ctrl.GetValuePattern().SetValue(value)
         except Exception:
             ctrl.Click()
             time.sleep(0.1)
@@ -277,91 +321,99 @@ class AppDriver:
             time.sleep(0.05)
             ctrl.SendKeys(value)
         time.sleep(0.2)
+        actual = _read_value(ctrl)
+        if actual is None:
+            return None
+        return actual == value
 
     def get_value(self, locator: tuple, timeout: float = None) -> str:
         """Get the current value of an edit/combo control."""
         ctrl = self.resolve(locator, timeout)
-        try:
-            return ctrl.GetValuePattern().Value
-        except Exception:
-            return _get_name(ctrl)
+        actual = _read_value(ctrl)
+        return _get_name(ctrl) if actual is None else actual
 
     def select_combobox_item(self, locator: tuple, item_text: str,
-                             timeout: float = None) -> bool:
+                             timeout: float = None):
         """
         Open a combobox and select an item by text.
-        Returns True if item was found and selected.
+        Returns True when verified, False when selection is known not to match,
+        and None when the app does not expose a readable selection state.
         """
         self.focus()
         ctrl = self.resolve(locator, timeout)
+        return self.select_combobox_item_by_control(ctrl, item_text)
+
+    def select_combobox_item_by_control(self, ctrl: auto.Control, item_text: str):
+        """Select and verify a combobox item on an already resolved control."""
         ctrl.Click()
         time.sleep(0.5)
 
-        # Try ExpandCollapsePattern first
         try:
-            pattern = ctrl.GetExpandCollapsePattern()
-            pattern.Expand()
+            ctrl.GetExpandCollapsePattern().Expand()
             time.sleep(0.3)
         except Exception:
             pass
 
-        # Look for list items
-        items = ctrl.GetChildren()
-        for item in items:
-            name = _get_name(item)
-            if item_text.lower() in name.lower():
+        for item in ctrl.GetChildren():
+            if item_text.casefold() in _get_name(item).casefold():
                 item.Click()
                 time.sleep(0.3)
-                return True
-
-        # Try searching deeper
-        try:
-            list_items = ctrl.GetChildren()
-            for li in list_items:
-                for sub in li.GetChildren():
-                    name = _get_name(sub)
-                    if item_text.lower() in name.lower():
+                return self._verify_combobox_selection(ctrl, item_text)
+            try:
+                for sub in item.GetChildren():
+                    if item_text.casefold() in _get_name(sub).casefold():
                         sub.Click()
                         time.sleep(0.3)
-                        return True
-        except Exception:
-            pass
+                        return self._verify_combobox_selection(ctrl, item_text)
+            except Exception:
+                pass
 
-        # Close the combobox if item not found
         try:
-            pattern = ctrl.GetExpandCollapsePattern()
-            pattern.Collapse()
+            ctrl.GetExpandCollapsePattern().Collapse()
         except Exception:
             ctrl.Click()
         return False
 
+    @staticmethod
+    def _verify_combobox_selection(ctrl: auto.Control, item_text: str):
+        """Poll the readable selection state briefly after selecting an item."""
+        state = None
+        for _ in range(5):
+            state = _selection_matches_text(ctrl, item_text)
+            if state is True:
+                return True
+            time.sleep(0.1)
+        return state
+
     def toggle_checkbox(self, locator: tuple, desired_state: bool = True,
-                        timeout: float = None) -> None:
+                        timeout: float = None):
         """Toggle a checkbox to the desired state (True=checked)."""
         self.focus()
         ctrl = self.resolve(locator, timeout)
-        self.toggle_checkbox_by_control(ctrl, desired_state)
+        return self.toggle_checkbox_by_control(ctrl, desired_state)
 
     def toggle_checkbox_by_control(self, ctrl: auto.Control,
-                                   desired_state: bool = True) -> None:
-        """Toggle a checkbox control directly (not by locator)."""
+                                   desired_state: bool = True):
+        """Set a checkbox state. Returns True/False, or None if unverifiable."""
         self.focus()
+        desired_state = bool(desired_state)
         try:
             pattern = ctrl.GetTogglePattern()
-            current = pattern.ToggleState
-            if (current == 0 and desired_state) or (current == 1 and not desired_state):
+            for _ in range(4):
+                if _read_toggle_state(ctrl) == desired_state:
+                    return True
                 pattern.Toggle()
+                time.sleep(0.1)
+            return _read_toggle_state(ctrl) == desired_state
         except Exception:
             ctrl.Click()
-        time.sleep(0.2)
+            time.sleep(0.3)
+            return _read_toggle_state(ctrl)
 
-    def is_checked(self, locator: tuple, timeout: float = None) -> bool:
-        """Check if a checkbox is currently checked."""
+    def is_checked(self, locator: tuple, timeout: float = None):
+        """Return True/False for a checkbox state, or None if unknown."""
         ctrl = self.resolve(locator, timeout)
-        try:
-            return ctrl.GetTogglePattern().ToggleState == 1
-        except Exception:
-            return False
+        return _read_toggle_state(ctrl)
 
     def scroll_to(self, sidebar_path: tuple, section_class: str) -> None:
         """Scroll a sidebar/scroll area to make a section visible.
