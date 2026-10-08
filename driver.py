@@ -55,6 +55,27 @@ def _get_process_name(pid: int) -> str:
         ctypes.windll.kernel32.CloseHandle(h)
 
 
+def _get_native_handle(control: auto.Control) -> int:
+    """Return a control or window native handle, or zero if unavailable."""
+    try:
+        return int(control.NativeWindowHandle or 0)
+    except Exception:
+        return 0
+
+
+def _get_control_pid(control: auto.Control) -> int:
+    """Best-effort process id for a UIA control."""
+    hwnd = _get_native_handle(control)
+    if hwnd:
+        return _get_pid_from_hwnd(hwnd)
+    try:
+        top = control.GetTopLevelControl()
+        hwnd = _get_native_handle(top)
+        return _get_pid_from_hwnd(hwnd) if hwnd else 0
+    except Exception:
+        return 0
+
+
 def _find_window_by_title(title: str, class_name: str = None,
                           timeout: float = 5, fuzzy: bool = True) -> auto.WindowControl:
     """
@@ -243,6 +264,7 @@ class AppDriver:
         self._window_class = window_class
         self._process_name = process_name
         self._window = None
+        self._pid = 0
         self._timeout = timeout
 
     def find_main_window(self) -> auto.WindowControl:
@@ -261,7 +283,53 @@ class AppDriver:
     def window(self) -> auto.WindowControl:
         if self._window is None or not self._window.Exists(maxSearchSeconds=1):
             self._window = self.find_main_window()
+            self._pid = _get_control_pid(self._window)
         return self._window
+
+    def get_search_roots(self) -> list:
+        """Return the main window and all same-process top-level surfaces."""
+        main = self.window
+        if not self._pid:
+            self._pid = _get_control_pid(main)
+        roots = [main]
+        seen = {_get_native_handle(main)}
+        try:
+            top_level = auto.GetRootControl().GetChildren()
+        except Exception:
+            return roots
+
+        for control in top_level:
+            try:
+                if control.ControlTypeName != "WindowControl":
+                    continue
+                handle = _get_native_handle(control)
+                if not handle or handle in seen:
+                    continue
+                if _get_pid_from_hwnd(handle) != self._pid:
+                    continue
+                roots.append(control)
+                seen.add(handle)
+            except Exception:
+                continue
+        return roots
+
+    def get_foreground_window(self):
+        """Return the current foreground top-level window when it belongs to this app."""
+        try:
+            foreground = auto.GetForegroundControl()
+            if foreground is None:
+                return None
+            top_level = foreground.GetTopLevelControl() or foreground
+            if _get_control_pid(top_level) == self._pid:
+                return top_level
+        except Exception:
+            pass
+        return None
+
+    def _ensure_process_foreground(self) -> None:
+        """Keep a same-process dialog/popup active; otherwise focus the main window."""
+        if self.get_foreground_window() is None:
+            self.focus()
 
     def focus(self) -> None:
         """Ensure the app window is in the foreground."""
@@ -288,14 +356,12 @@ class AppDriver:
 
     def click(self, locator: tuple, timeout: float = None) -> None:
         """Click a control identified by locator."""
-        self.focus()
         ctrl = self.resolve(locator, timeout)
         ctrl.Click()
         time.sleep(0.2)
 
     def invoke(self, locator: tuple, timeout: float = None) -> None:
         """Invoke a control (for buttons that support InvokePattern)."""
-        self.focus()
         ctrl = self.resolve(locator, timeout)
         try:
             pattern = ctrl.GetInvokePattern()
@@ -306,7 +372,6 @@ class AppDriver:
 
     def set_value(self, locator: tuple, value: str, timeout: float = None):
         """Set an edit control value and return verification state."""
-        self.focus()
         ctrl = self.resolve(locator, timeout)
         return self.set_value_by_control(ctrl, value)
 
@@ -339,7 +404,6 @@ class AppDriver:
         Returns True when verified, False when selection is known not to match,
         and None when the app does not expose a readable selection state.
         """
-        self.focus()
         ctrl = self.resolve(locator, timeout)
         return self.select_combobox_item_by_control(ctrl, item_text)
 
@@ -388,14 +452,12 @@ class AppDriver:
     def toggle_checkbox(self, locator: tuple, desired_state: bool = True,
                         timeout: float = None):
         """Toggle a checkbox to the desired state (True=checked)."""
-        self.focus()
         ctrl = self.resolve(locator, timeout)
         return self.toggle_checkbox_by_control(ctrl, desired_state)
 
     def toggle_checkbox_by_control(self, ctrl: auto.Control,
                                    desired_state: bool = True):
         """Set a checkbox state. Returns True/False, or None if unverifiable."""
-        self.focus()
         desired_state = bool(desired_state)
         try:
             pattern = ctrl.GetTogglePattern()
@@ -420,7 +482,6 @@ class AppDriver:
         sidebar_path: locator tuple to the content QWidget (e.g. ("MyWidget", "CScrollArea", 0, "QWidget"))
         section_class: ClassName of the section to scroll to
         """
-        self.focus()
         try:
             section = self.resolve((*sidebar_path, section_class), timeout=3)
             section.ScrollIntoView()
@@ -503,7 +564,13 @@ class AppDriver:
         """Find controls by Name attribute (searches all descendants).
         partial=True for substring match. Exact matches always come first."""
         if control is None:
-            control = self.window
+            exact = []
+            fuzzy = []
+            for root in self.get_search_roots():
+                root_exact, root_fuzzy = self._find_by_name_split(name, root, partial)
+                exact.extend(root_exact)
+                fuzzy.extend(root_fuzzy)
+            return exact + fuzzy
         exact = []
         fuzzy = []
         try:
@@ -548,7 +615,13 @@ class AppDriver:
         """Find controls by ClassName (searches all descendants).
         Exact matches always come first."""
         if control is None:
-            control = self.window
+            exact = []
+            fuzzy = []
+            for root in self.get_search_roots():
+                root_exact, root_fuzzy = self._find_by_class_split(class_name, root, partial)
+                exact.extend(root_exact)
+                fuzzy.extend(root_fuzzy)
+            return exact + fuzzy
         exact = []
         fuzzy = []
         try:
@@ -591,7 +664,10 @@ class AppDriver:
     def find_by_auto_id(self, auto_id: str, control: auto.Control = None) -> list:
         """Find controls by AutomationId (searches all descendants)."""
         if control is None:
-            control = self.window
+            results = []
+            for root in self.get_search_roots():
+                results.extend(self.find_by_auto_id(auto_id, root))
+            return results
         results = []
         try:
             for child in control.GetChildren():
@@ -607,40 +683,41 @@ class AppDriver:
 
     def click_control(self, control: auto.Control) -> None:
         """Click a UIA control directly."""
-        self.focus()
         control.Click()
         time.sleep(0.2)
 
     def type_text(self, text: str, control: auto.Control = None) -> None:
         """Type text into a control (or the focused element if control is None)."""
-        self.focus()
         if control is not None:
             control.Click()
             time.sleep(0.1)
+            try:
+                control.SetFocus()
+            except Exception:
+                pass
+        else:
+            self._ensure_process_foreground()
         auto.SendKeys(text)
         time.sleep(0.2)
 
     def double_click_control(self, control: auto.Control) -> None:
         """Double-click a UIA control directly."""
-        self.focus()
         control.DoubleClick()
         time.sleep(0.2)
 
     def right_click_control(self, control: auto.Control) -> None:
         """Right-click a UIA control directly."""
-        self.focus()
         control.RightClick()
         time.sleep(0.2)
 
     def hover_control(self, control: auto.Control) -> None:
         """Hover (move mouse to) a UIA control."""
-        self.focus()
         control.MoveCursorToMyCenter()
         time.sleep(0.1)
 
     def scroll_up(self, control: auto.Control = None, count: int = 3) -> None:
         """Scroll up on a control or the window."""
-        self.focus()
+        self._ensure_process_foreground()
         target = control if control is not None else self.window
         for _ in range(count):
             target.WheelUp()
@@ -649,7 +726,7 @@ class AppDriver:
 
     def scroll_down(self, control: auto.Control = None, count: int = 3) -> None:
         """Scroll down on a control or the window."""
-        self.focus()
+        self._ensure_process_foreground()
         target = control if control is not None else self.window
         for _ in range(count):
             target.WheelDown()
@@ -658,20 +735,20 @@ class AppDriver:
 
     def send_key(self, key: str) -> None:
         """Send a single key press. E.g. '{Enter}', '{Escape}', '{Tab}', 'a'."""
-        self.focus()
+        self._ensure_process_foreground()
         auto.SendKeys(key)
         time.sleep(0.1)
 
     def send_hotkey(self, *keys: str) -> None:
         """Send a key combination. E.g. ('Ctrl', 'c'), ('Alt', 'F4')."""
-        self.focus()
+        self._ensure_process_foreground()
         combo = "".join(f"{{{k}}}" if len(k) > 1 else k for k in keys)
         auto.SendKeys(combo)
         time.sleep(0.1)
 
     def long_press_key(self, key: str, duration: float = 1.0) -> None:
         """Hold a key down for duration seconds, then release."""
-        self.focus()
+        self._ensure_process_foreground()
         vk = auto.CharToKeyCode(key)
         ctypes.windll.user32.keybd_event(vk, 0, 0, 0)  # key down
         time.sleep(duration)
