@@ -1,6 +1,6 @@
 import unittest
 
-import skills_library as sk
+from winui_mcp import skills_library as sk
 
 
 class _Control:

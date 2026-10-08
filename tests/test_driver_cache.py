@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import Mock, patch
 
-import driver
-from driver import AppDriver
+from winui_mcp import driver
+from winui_mcp.driver import AppDriver
 
 
 class _Window:

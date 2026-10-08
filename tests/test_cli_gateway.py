@@ -4,7 +4,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-import cli_gateway
+from winui_mcp import cli_gateway
 
 
 class CliGatewayTests(unittest.TestCase):

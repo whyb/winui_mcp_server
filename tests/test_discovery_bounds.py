@@ -1,7 +1,7 @@
 import unittest
 
-import skills_library as sk
-from driver import AppDriver
+from winui_mcp import skills_library as sk
+from winui_mcp.driver import AppDriver
 
 
 class _Rect:

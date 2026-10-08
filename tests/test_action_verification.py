@@ -1,9 +1,9 @@
 import unittest
 from unittest.mock import patch
 
-import driver
-import skills_library as sk
-from driver import AppDriver
+from winui_mcp import driver
+from winui_mcp import skills_library as sk
+from winui_mcp.driver import AppDriver
 
 
 class _TogglePattern:

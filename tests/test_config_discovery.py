@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import config
+from winui_mcp import config
 
 
 class ConfigDiscoveryTests(unittest.TestCase):

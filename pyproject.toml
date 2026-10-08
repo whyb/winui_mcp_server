@@ -15,7 +15,16 @@ dependencies = [
 ]
 
 [project.scripts]
-winui-mcp = "mcp_server:main"
+winui-mcp = "winui_mcp.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["."]
+packages = ["winui_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/winui_mcp",
+    "/README.md",
+    "/README.cn.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]

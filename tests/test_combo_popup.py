@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from driver import AppDriver
+from winui_mcp.driver import AppDriver
 
 
 class _Item:

@@ -2,7 +2,7 @@ import ctypes.wintypes
 import os
 import unittest
 
-import driver
+from winui_mcp import driver
 
 
 class Win32PrototypeTests(unittest.TestCase):
