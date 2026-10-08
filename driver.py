@@ -18,6 +18,38 @@ except Exception:
         pass
 
 
+_kernel32 = ctypes.windll.kernel32
+_psapi = ctypes.windll.psapi
+_user32 = ctypes.windll.user32
+
+_kernel32.OpenProcess.argtypes = [
+    ctypes.wintypes.DWORD, ctypes.wintypes.BOOL, ctypes.wintypes.DWORD
+]
+_kernel32.OpenProcess.restype = ctypes.wintypes.HANDLE
+_kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+_kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
+
+_psapi.GetModuleBaseNameW.argtypes = [
+    ctypes.wintypes.HANDLE, ctypes.wintypes.HMODULE,
+    ctypes.wintypes.LPWSTR, ctypes.wintypes.DWORD,
+]
+_psapi.GetModuleBaseNameW.restype = ctypes.wintypes.DWORD
+
+_user32.GetWindowThreadProcessId.argtypes = [
+    ctypes.wintypes.HWND, ctypes.wintypes.LPDWORD
+]
+_user32.GetWindowThreadProcessId.restype = ctypes.wintypes.DWORD
+_user32.ShowWindow.argtypes = [ctypes.wintypes.HWND, ctypes.c_int]
+_user32.ShowWindow.restype = ctypes.wintypes.BOOL
+_user32.SetForegroundWindow.argtypes = [ctypes.wintypes.HWND]
+_user32.SetForegroundWindow.restype = ctypes.wintypes.BOOL
+_user32.keybd_event.argtypes = [
+    ctypes.wintypes.BYTE, ctypes.wintypes.BYTE,
+    ctypes.wintypes.DWORD, ctypes.c_size_t,
+]
+_user32.keybd_event.restype = None
+
+
 def _get_class_name(control: auto.Control) -> str:
     try:
         return control.ClassName or ""
@@ -34,14 +66,14 @@ def _get_name(control: auto.Control) -> str:
 
 def _get_pid_from_hwnd(hwnd: int) -> int:
     pid = ctypes.wintypes.DWORD()
-    ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     return pid.value
 
 
 def _get_process_name(pid: int) -> str:
     PROCESS_QUERY_INFORMATION = 0x0400
     PROCESS_VM_READ = 0x0010
-    h = ctypes.windll.kernel32.OpenProcess(
+    h = _kernel32.OpenProcess(
         PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid
     )
     if not h:
@@ -49,10 +81,10 @@ def _get_process_name(pid: int) -> str:
     try:
         buf = ctypes.create_unicode_buffer(512)
         size = ctypes.wintypes.DWORD(512)
-        ctypes.windll.psapi.GetModuleBaseNameW(h, None, buf, size)
+        _psapi.GetModuleBaseNameW(h, None, buf, size)
         return buf.value
     finally:
-        ctypes.windll.kernel32.CloseHandle(h)
+        _kernel32.CloseHandle(h)
 
 
 def _get_native_handle(control: auto.Control) -> int:
@@ -437,8 +469,8 @@ class AppDriver:
         except Exception:
             try:
                 hwnd = win.NativeWindowHandle
-                ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
+                _user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                _user32.SetForegroundWindow(hwnd)
                 time.sleep(0.2)
             except Exception:
                 pass
@@ -899,11 +931,11 @@ class AppDriver:
         """Hold a key down for duration seconds, then release."""
         self._ensure_process_foreground()
         vk = _resolve_virtual_key(key)
-        ctypes.windll.user32.keybd_event(vk, 0, 0, 0)  # key down
+        _user32.keybd_event(vk, 0, 0, 0)  # key down
         try:
             time.sleep(duration)
         finally:
-            ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # key up
+            _user32.keybd_event(vk, 0, 2, 0)  # key up
             time.sleep(0.1)
 
 
