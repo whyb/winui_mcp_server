@@ -62,6 +62,37 @@ def _scroll_if_needed(driver: AppDriver, sidebar_path: tuple = None,
         driver.scroll_to(sidebar_path, section_class)
 
 
+def _select_match(driver: AppDriver, matches: list, index: int, target: str):
+    """Select an indexed match and raise a useful error for ambiguity."""
+    if index < 0:
+        raise IndexError(f"index must be non-negative, got {index}")
+    if index >= len(matches):
+        candidates = []
+        for match in matches[:5]:
+            info = driver._get_control_info(match)
+            candidates.append({
+                "class": info.get("class", ""),
+                "name": info.get("name", ""),
+                "auto_id": info.get("auto_id", ""),
+                "control_type": info.get("control_type", ""),
+            })
+        raise IndexError(
+            f"Only {len(matches)} controls matched '{target}', wanted index {index}. "
+            f"Candidates: {candidates}"
+        )
+    return matches[index]
+
+
+def _match_data(info: dict, matches: list, index: int) -> dict:
+    """Return compact match metadata for an action result."""
+    return {
+        "control": info,
+        "match_count": len(matches),
+        "match_index": index,
+        "ambiguous": len(matches) > 1,
+    }
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Generic Skills
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -191,19 +222,19 @@ def read_slider(driver: AppDriver, slider_locator: tuple) -> dict:
         return _fail(f"Failed to read slider: {e}")
 
 
-def get_text_by_name(driver: AppDriver, name: str, partial: bool = True) -> dict:
+def get_text_by_name(driver: AppDriver, name: str, partial: bool = True,
+                     index: int = 0) -> dict:
     """Read the Name text of a control (labels, headers, static text, etc.)."""
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
             return _fail(f"No control found with name '{name}'")
-        ctrl = matches[0]
+        ctrl = _select_match(driver, matches, index, name)
         info = driver._get_control_info(ctrl)
         text = _get_name(ctrl)
-        return _ok(f"Text read from '{info['name']}'", {
-            "text": text,
-            "control": info,
-        })
+        data = _match_data(info, matches, index)
+        data["text"] = text
+        return _ok(f"Text read from '{info['name']}'", data)
     except Exception as e:
         return _fail(f"Failed to get text from '{name}': {e}")
 
@@ -383,18 +414,19 @@ def _hint_no_control(driver: AppDriver, target: str, by: str = "name") -> str:
     return msg
 
 
-def click_by_name(driver: AppDriver, name: str, partial: bool = True) -> dict:
+def click_by_name(driver: AppDriver, name: str, partial: bool = True,
+                  index: int = 0) -> dict:
     """Click a control found by its Name attribute. Searches all descendants."""
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, name, "name"))
-        ctrl = matches[0]
+        ctrl = _select_match(driver, matches, index, name)
         info = driver._get_control_info(ctrl)
         driver.click_control(ctrl)
         return _ok(
             f"Clicked '{info['name']}' ({info['class']}); state change not verified",
-            {"control": info},
+            _match_data(info, matches, index),
             verified=False,
         )
     except Exception as e:
@@ -408,14 +440,12 @@ def click_by_class(driver: AppDriver, class_name: str, index: int = 0,
         matches = driver.find_by_class(class_name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, class_name, "class"))
-        if index >= len(matches):
-            return _fail(f"Only {len(matches)} controls with class '{class_name}', wanted index {index}")
-        ctrl = matches[index]
+        ctrl = _select_match(driver, matches, index, class_name)
         info = driver._get_control_info(ctrl)
         driver.click_control(ctrl)
         return _ok(
             f"Clicked '{info['name']}' ({info['class']}); state change not verified",
-            {"control": info},
+            _match_data(info, matches, index),
             verified=False,
         )
     except Exception as e:
@@ -423,16 +453,17 @@ def click_by_class(driver: AppDriver, class_name: str, index: int = 0,
 
 
 def toggle_by_name(driver: AppDriver, name: str, enabled: bool = True,
-                   partial: bool = True) -> dict:
+                   partial: bool = True, index: int = 0) -> dict:
     """Toggle a checkbox/switch found by Name."""
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, name, "name"))
-        ctrl = matches[0]
+        ctrl = _select_match(driver, matches, index, name)
         info = driver._get_control_info(ctrl)
         state = driver.toggle_checkbox_by_control(ctrl, enabled)
-        data = {"control": info, "requested_state": bool(enabled), "actual_state": state}
+        data = _match_data(info, matches, index)
+        data.update({"requested_state": bool(enabled), "actual_state": state})
         if state is False:
             return _fail(
                 f"Toggle state does not match requested state for '{info['name']}'",
@@ -455,20 +486,24 @@ def toggle_by_name(driver: AppDriver, name: str, enabled: bool = True,
 
 
 def type_in(driver: AppDriver, text: str, control_name: str = None,
-            control_class: str = None) -> dict:
+            control_class: str = None, index: int = 0,
+            partial: bool = True) -> dict:
     """Type text into a control found by name or class, or into the focused element."""
     try:
         ctrl = None
+        match_count = 0
         if control_name:
-            matches = driver.find_by_name(control_name, partial=True)
+            matches = driver.find_by_name(control_name, partial=partial)
             if not matches:
                 return _fail(_hint_no_control(driver, control_name, "name"))
-            ctrl = matches[0]
+            ctrl = _select_match(driver, matches, index, control_name)
+            match_count = len(matches)
         elif control_class:
-            matches = driver.find_by_class(control_class, partial=True)
+            matches = driver.find_by_class(control_class, partial=partial)
             if not matches:
                 return _fail(_hint_no_control(driver, control_class, "class"))
-            ctrl = matches[0]
+            ctrl = _select_match(driver, matches, index, control_class)
+            match_count = len(matches)
 
         driver.type_text(text, ctrl)
         target_desc = _get_name(ctrl) if ctrl else "focused element"
@@ -477,11 +512,12 @@ def type_in(driver: AppDriver, text: str, control_name: str = None,
             actual = _read_value(ctrl)
             if actual is not None:
                 verified = text in actual
+        data = {"match_count": match_count, "match_index": index, "verified_value": verified}
         if verified is True:
-            return _ok(f"Typed text into '{target_desc}'", verified=True)
+            return _ok(f"Typed text into '{target_desc}'", data, verified=True)
         return _ok(
             f"Typed text into '{target_desc}', resulting value could not be verified",
-            {"verified_value": verified},
+            data,
             verified=False,
         )
     except Exception as e:
@@ -489,13 +525,14 @@ def type_in(driver: AppDriver, text: str, control_name: str = None,
 
 
 def select_in_combo(driver: AppDriver, item_text: str, combo_name: str = None,
-                    combo_class: str = None, combo_index: int = 0) -> dict:
+                    combo_class: str = None, combo_index: int = 0,
+                    partial: bool = True) -> dict:
     """Select an item from a combobox found by name or class."""
     try:
         if combo_name:
-            matches = driver.find_by_name(combo_name, partial=True)
+            matches = driver.find_by_name(combo_name, partial=partial)
         elif combo_class:
-            matches = driver.find_by_class(combo_class, partial=True)
+            matches = driver.find_by_class(combo_class, partial=partial)
         else:
             return _fail("Must specify combo_name or combo_class")
 
@@ -503,13 +540,11 @@ def select_in_combo(driver: AppDriver, item_text: str, combo_name: str = None,
             target = combo_name or combo_class
             return _fail(_hint_no_control(driver, target, "name" if combo_name else "class"))
 
-        if combo_index >= len(matches):
-            return _fail(f"Only {len(matches)} comboboxes found, wanted index {combo_index}")
-
-        ctrl = matches[combo_index]
+        ctrl = _select_match(driver, matches, combo_index, combo_name or combo_class)
         info = driver._get_control_info(ctrl)
         state = driver.select_combobox_item_by_control(ctrl, item_text)
-        data = {"control": info, "requested_item": item_text, "selected": state}
+        data = _match_data(info, matches, combo_index)
+        data.update({"requested_item": item_text, "selected": state})
         if state is False:
             return _fail(f"Item '{item_text}' was not selected in '{info['name']}'", data, verified=True)
         if state is None:
@@ -524,16 +559,17 @@ def select_in_combo(driver: AppDriver, item_text: str, combo_name: str = None,
 
 
 def set_value_by_name(driver: AppDriver, name: str, value: str,
-                      partial: bool = True) -> dict:
+                      partial: bool = True, index: int = 0) -> dict:
     """Set the value of an edit/spinbox control found by Name."""
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, name, "name"))
-        ctrl = matches[0]
+        ctrl = _select_match(driver, matches, index, name)
         info = driver._get_control_info(ctrl)
         state = driver.set_value_by_control(ctrl, value)
-        data = {"control": info, "requested_value": value, "verified_value": state}
+        data = _match_data(info, matches, index)
+        data.update({"requested_value": value, "verified_value": state})
         if state is False:
             return _fail(
                 f"Value did not change to '{value}' on '{info['name']}'",
@@ -552,23 +588,20 @@ def set_value_by_name(driver: AppDriver, name: str, value: str,
 
 
 def get_value_by_name(driver: AppDriver, name: str,
-                      partial: bool = True) -> dict:
+                      partial: bool = True, index: int = 0) -> dict:
     """Read the value of a control found by Name."""
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, name, "name"))
-        ctrl = matches[0]
+        ctrl = _select_match(driver, matches, index, name)
         info = driver._get_control_info(ctrl)
-        value = ""
-        try:
-            value = ctrl.GetValuePattern().Value
-        except Exception:
+        value = _read_value(ctrl)
+        if value is None:
             value = _get_name(ctrl)
-        return _ok(f"Value read from '{info['name']}'", {
-            "value": value,
-            "control": info,
-        })
+        data = _match_data(info, matches, index)
+        data["value"] = value
+        return _ok(f"Value read from '{info['name']}'", data)
     except Exception as e:
         return _fail(f"Failed to get value: {e}")
 
@@ -578,18 +611,19 @@ def get_value_by_name(driver: AppDriver, name: str,
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-def double_click_by_name(driver: AppDriver, name: str, partial: bool = True) -> dict:
+def double_click_by_name(driver: AppDriver, name: str, partial: bool = True,
+                         index: int = 0) -> dict:
     """Double-click a control found by Name."""
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, name, "name"))
-        ctrl = matches[0]
+        ctrl = _select_match(driver, matches, index, name)
         info = driver._get_control_info(ctrl)
         driver.double_click_control(ctrl)
         return _ok(
             f"Double-clicked '{info['name']}' ({info['class']}); state change not verified",
-            {"control": info},
+            _match_data(info, matches, index),
             verified=False,
         )
     except Exception as e:
@@ -603,32 +637,31 @@ def double_click_by_class(driver: AppDriver, class_name: str, index: int = 0,
         matches = driver.find_by_class(class_name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, class_name, "class"))
-        if index >= len(matches):
-            return _fail(f"Only {len(matches)} controls with class '{class_name}', wanted index {index}")
-        ctrl = matches[index]
+        ctrl = _select_match(driver, matches, index, class_name)
         info = driver._get_control_info(ctrl)
         driver.double_click_control(ctrl)
         return _ok(
             f"Double-clicked '{info['name']}' ({info['class']}); state change not verified",
-            {"control": info},
+            _match_data(info, matches, index),
             verified=False,
         )
     except Exception as e:
         return _fail(f"Failed to double-click: {e}")
 
 
-def right_click_by_name(driver: AppDriver, name: str, partial: bool = True) -> dict:
+def right_click_by_name(driver: AppDriver, name: str, partial: bool = True,
+                        index: int = 0) -> dict:
     """Right-click a control found by Name."""
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, name, "name"))
-        ctrl = matches[0]
+        ctrl = _select_match(driver, matches, index, name)
         info = driver._get_control_info(ctrl)
         driver.right_click_control(ctrl)
         return _ok(
             f"Right-clicked '{info['name']}' ({info['class']}); state change not verified",
-            {"control": info},
+            _match_data(info, matches, index),
             verified=False,
         )
     except Exception as e:
@@ -642,32 +675,31 @@ def right_click_by_class(driver: AppDriver, class_name: str, index: int = 0,
         matches = driver.find_by_class(class_name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, class_name, "class"))
-        if index >= len(matches):
-            return _fail(f"Only {len(matches)} controls with class '{class_name}', wanted index {index}")
-        ctrl = matches[index]
+        ctrl = _select_match(driver, matches, index, class_name)
         info = driver._get_control_info(ctrl)
         driver.right_click_control(ctrl)
         return _ok(
             f"Right-clicked '{info['name']}' ({info['class']}); state change not verified",
-            {"control": info},
+            _match_data(info, matches, index),
             verified=False,
         )
     except Exception as e:
         return _fail(f"Failed to right-click: {e}")
 
 
-def hover_by_name(driver: AppDriver, name: str, partial: bool = True) -> dict:
+def hover_by_name(driver: AppDriver, name: str, partial: bool = True,
+                  index: int = 0) -> dict:
     """Hover (move mouse to) a control found by Name."""
     try:
         matches = driver.find_by_name(name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, name, "name"))
-        ctrl = matches[0]
+        ctrl = _select_match(driver, matches, index, name)
         info = driver._get_control_info(ctrl)
         driver.hover_control(ctrl)
         return _ok(
             f"Hovering over '{info['name']}' ({info['class']}); state change not verified",
-            {"control": info},
+            _match_data(info, matches, index),
             verified=False,
         )
     except Exception as e:
@@ -681,14 +713,12 @@ def hover_by_class(driver: AppDriver, class_name: str, index: int = 0,
         matches = driver.find_by_class(class_name, partial=partial)
         if not matches:
             return _fail(_hint_no_control(driver, class_name, "class"))
-        if index >= len(matches):
-            return _fail(f"Only {len(matches)} controls with class '{class_name}', wanted index {index}")
-        ctrl = matches[index]
+        ctrl = _select_match(driver, matches, index, class_name)
         info = driver._get_control_info(ctrl)
         driver.hover_control(ctrl)
         return _ok(
             f"Hovering over '{info['name']}' ({info['class']}); state change not verified",
-            {"control": info},
+            _match_data(info, matches, index),
             verified=False,
         )
     except Exception as e:

@@ -116,11 +116,11 @@ def get_control_rect(window_title: str = None, process_name: str = None,
 @mcp.tool()
 def find_control(window_title: str = None, process_name: str = None,
                  window_class: str = None, name: str = None,
-                 control_class: str = None) -> str:
+                 control_class: str = None, partial: bool = True) -> str:
     """Find controls by name or class and return their info WITHOUT clicking.
     Use this to check if a control exists or to inspect multiple matches."""
     driver = get_cached_driver(window_title, process_name, window_class)
-    return _json(sk.find_control(driver, name, control_class))
+    return _json(sk.find_control(driver, name, control_class, partial))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -131,46 +131,50 @@ def find_control(window_title: str = None, process_name: str = None,
 @mcp.tool()
 def click(window_title: str = None, process_name: str = None,
           window_class: str = None, name: str = None,
-          control_class: str = None, index: int = 0) -> str:
+          control_class: str = None, index: int = 0,
+          partial: bool = True) -> str:
     """Click a control by name or class name.
     Use 'name' for substring match on control Name, or 'control_class' for ClassName match."""
     driver = get_cached_driver(window_title, process_name, window_class)
     if name:
-        return _json(sk.click_by_name(driver, name))
-    return _json(sk.click_by_class(driver, control_class, index))
+        return _json(sk.click_by_name(driver, name, partial, index))
+    return _json(sk.click_by_class(driver, control_class, index, partial))
 
 
 @mcp.tool()
 def double_click(window_title: str = None, process_name: str = None,
                  window_class: str = None, name: str = None,
-                 control_class: str = None, index: int = 0) -> str:
+                 control_class: str = None, index: int = 0,
+                 partial: bool = True) -> str:
     """Double-click a control by name or class name."""
     driver = get_cached_driver(window_title, process_name, window_class)
     if name:
-        return _json(sk.double_click_by_name(driver, name))
-    return _json(sk.double_click_by_class(driver, control_class, index))
+        return _json(sk.double_click_by_name(driver, name, partial, index))
+    return _json(sk.double_click_by_class(driver, control_class, index, partial))
 
 
 @mcp.tool()
 def right_click(window_title: str = None, process_name: str = None,
                 window_class: str = None, name: str = None,
-                control_class: str = None, index: int = 0) -> str:
+                control_class: str = None, index: int = 0,
+                partial: bool = True) -> str:
     """Right-click a control by name or class name."""
     driver = get_cached_driver(window_title, process_name, window_class)
     if name:
-        return _json(sk.right_click_by_name(driver, name))
-    return _json(sk.right_click_by_class(driver, control_class, index))
+        return _json(sk.right_click_by_name(driver, name, partial, index))
+    return _json(sk.right_click_by_class(driver, control_class, index, partial))
 
 
 @mcp.tool()
 def hover(window_title: str = None, process_name: str = None,
           window_class: str = None, name: str = None,
-          control_class: str = None, index: int = 0) -> str:
+          control_class: str = None, index: int = 0,
+          partial: bool = True) -> str:
     """Hover (move mouse to) a control by name or class name."""
     driver = get_cached_driver(window_title, process_name, window_class)
     if name:
-        return _json(sk.hover_by_name(driver, name))
-    return _json(sk.hover_by_class(driver, control_class, index))
+        return _json(sk.hover_by_name(driver, name, partial, index))
+    return _json(sk.hover_by_class(driver, control_class, index, partial))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -235,11 +239,12 @@ def long_press_key(window_title: str = None, process_name: str = None,
 @mcp.tool()
 def type_text(window_title: str = None, process_name: str = None,
               window_class: str = None, text: str = "",
-              name: str = None, control_class: str = None) -> str:
+              name: str = None, control_class: str = None,
+              index: int = 0, partial: bool = True) -> str:
     """Type text into a control (found by name/class) or the focused element.
     Use 'name' or 'control_class' to target a specific input field."""
     driver = get_cached_driver(window_title, process_name, window_class)
-    return _json(sk.type_in(driver, text, name, control_class))
+    return _json(sk.type_in(driver, text, name, control_class, index, partial))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -249,37 +254,41 @@ def type_text(window_title: str = None, process_name: str = None,
 
 @mcp.tool()
 def get_value(window_title: str = None, process_name: str = None,
-              window_class: str = None, name: str = "") -> str:
+              window_class: str = None, name: str = "",
+              index: int = 0, partial: bool = True) -> str:
     """Read the current value of a control (edit box, spinbox, etc.) by name.
     Only works for controls that support ValuePattern (input fields, spinboxes).
     For static text labels, use 'get_text' instead."""
     driver = get_cached_driver(window_title, process_name, window_class)
-    return _json(sk.get_value_by_name(driver, name))
+    return _json(sk.get_value_by_name(driver, name, partial, index))
 
 
 @mcp.tool()
 def get_text(window_title: str = None, process_name: str = None,
-             window_class: str = None, name: str = "") -> str:
+             window_class: str = None, name: str = "",
+             index: int = 0, partial: bool = True) -> str:
     """Read the Name text of a control (labels, headers, static text, buttons).
     Use this for controls that display text but don't support ValuePattern.
     For input fields / edit boxes, use 'get_value' instead."""
     driver = get_cached_driver(window_title, process_name, window_class)
-    return _json(sk.get_text_by_name(driver, name))
+    return _json(sk.get_text_by_name(driver, name, partial, index))
 
 
 @mcp.tool()
 def set_value(window_title: str = None, process_name: str = None,
               window_class: str = None, name: str = "",
-              value: str = "") -> str:
+              value: str = "", index: int = 0,
+              partial: bool = True) -> str:
     """Set the value of an edit/spinbox control by name."""
     driver = get_cached_driver(window_title, process_name, window_class)
-    return _json(sk.set_value_by_name(driver, name, value))
+    return _json(sk.set_value_by_name(driver, name, value, partial, index))
 
 
 @mcp.tool()
 def toggle(window_title: str = None, process_name: str = None,
            window_class: str = None, name: str = "",
-           enable: bool = None) -> str:
+           enable: bool = None, index: int = 0,
+           partial: bool = True) -> str:
     """Toggle a checkbox or switch by name.
     - enable=True: force to checked state
     - enable=False: force to unchecked state
@@ -287,27 +296,31 @@ def toggle(window_title: str = None, process_name: str = None,
     driver = get_cached_driver(window_title, process_name, window_class)
     if enable is None:
         # Flip: read current state, then toggle to opposite
-        matches = driver.find_by_name(name, partial=True)
+        matches = driver.find_by_name(name, partial=partial)
         if not matches:
             return _json(sk._fail(sk._hint_no_control(driver, name, "name")))
-        ctrl = matches[0]
+        try:
+            ctrl = sk._select_match(driver, matches, index, name)
+        except Exception as e:
+            return _json(sk._fail(str(e)))
         try:
             current = ctrl.GetTogglePattern().ToggleState
             new_state = not bool(current)
         except Exception:
             new_state = True  # Can't read state, assume off -> toggle on
-        return _json(sk.toggle_by_name(driver, name, new_state))
-    return _json(sk.toggle_by_name(driver, name, enable))
+        return _json(sk.toggle_by_name(driver, name, new_state, partial, index))
+    return _json(sk.toggle_by_name(driver, name, enable, partial, index))
 
 
 @mcp.tool()
 def combo_select(window_title: str = None, process_name: str = None,
                  window_class: str = None, item: str = "",
-                 name: str = None, control_class: str = None) -> str:
+                 name: str = None, control_class: str = None,
+                 combo_index: int = 0, partial: bool = True) -> str:
     """Select an item from a combobox by text.
     Specify the combobox by 'name' or 'control_class'."""
     driver = get_cached_driver(window_title, process_name, window_class)
-    return _json(sk.select_in_combo(driver, item, name, control_class))
+    return _json(sk.select_in_combo(driver, item, name, control_class, combo_index, partial))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

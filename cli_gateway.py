@@ -26,21 +26,26 @@ def print_result(result: dict):
 
 def _toggle_handler(driver: AppDriver, kw: dict) -> dict:
     """Handle toggle command: flip if no flag, or force --enable/--disable."""
+    partial = kw.get("partial", True)
+    index = kw.get("index", 0)
     if kw.get("enable"):
-        return sk.toggle_by_name(driver, kw["name"], True)
+        return sk.toggle_by_name(driver, kw["name"], True, partial, index)
     if kw.get("disable"):
-        return sk.toggle_by_name(driver, kw["name"], False)
+        return sk.toggle_by_name(driver, kw["name"], False, partial, index)
     # Neither flag: flip current state by reading ToggleState first
-    matches = driver.find_by_name(kw["name"], partial=True)
+    matches = driver.find_by_name(kw["name"], partial=partial)
     if not matches:
         return sk._fail(sk._hint_no_control(driver, kw["name"], "name"))
-    ctrl = matches[0]
+    try:
+        ctrl = sk._select_match(driver, matches, index, kw["name"])
+    except Exception as e:
+        return sk._fail(str(e))
     try:
         current = ctrl.GetTogglePattern().ToggleState
         new_state = not bool(current)
     except Exception:
         new_state = True  # Can't read state, assume off -> toggle on
-    return sk.toggle_by_name(driver, kw["name"], new_state)
+    return sk.toggle_by_name(driver, kw["name"], new_state, partial, index)
 
 
 def make_driver(window_title: str = None, window_class: str = None,
@@ -85,7 +90,7 @@ COMMANDS = {
     },
     "click": {
         "func": lambda d, **kw: (
-            sk.click_by_name(d, kw["name"], kw.get("partial", True))
+            sk.click_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
             if kw.get("name") else
             sk.click_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
         ),
@@ -93,7 +98,8 @@ COMMANDS = {
         "args": [
             {"name": "--name", "type": str, "default": None, "help": "Control name (substring match)"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
-            {"name": "--index", "type": int, "default": 0, "help": "Nth match for --class (default 0)"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "toggle": {
@@ -103,39 +109,49 @@ COMMANDS = {
             {"name": "--name", "type": str, "required": True, "help": "Control name"},
             {"name": "--enable", "action": "store_true", "default": None, "help": "Force checked state"},
             {"name": "--disable", "action": "store_true", "default": None, "dest": "disable", "help": "Force unchecked state"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "type": {
-        "func": lambda d, **kw: sk.type_in(d, kw["text"], kw.get("name"), kw.get("class_name")),
+        "func": lambda d, **kw: sk.type_in(d, kw["text"], kw.get("name"), kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)),
         "desc": "Type text into a control (or focused element)",
         "args": [
             {"name": "--text", "type": str, "required": True, "help": "Text to type"},
             {"name": "--name", "type": str, "default": None, "help": "Target control name"},
             {"name": "--class", "type": str, "default": None, "help": "Target control class", "dest": "class_name"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "set-value": {
-        "func": lambda d, **kw: sk.set_value_by_name(d, kw["name"], kw["value"]),
+        "func": lambda d, **kw: sk.set_value_by_name(d, kw["name"], kw["value"], kw.get("partial", True), kw.get("index", 0)),
         "desc": "Set value of an edit/spinbox by name",
         "args": [
             {"name": "--name", "type": str, "required": True, "help": "Control name"},
             {"name": "--value", "type": str, "required": True, "help": "Value to set"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "get-value": {
-        "func": lambda d, **kw: sk.get_value_by_name(d, kw["name"]),
+        "func": lambda d, **kw: sk.get_value_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0)),
         "desc": "Read value of a control by name",
         "args": [
             {"name": "--name", "type": str, "required": True, "help": "Control name"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "combo-select": {
-        "func": lambda d, **kw: sk.select_in_combo(d, kw["item"], kw.get("name"), kw.get("class_name")),
+        "func": lambda d, **kw: sk.select_in_combo(d, kw["item"], kw.get("name"), kw.get("class_name"), kw.get("combo_index", 0), kw.get("partial", True)),
         "desc": "Select an item from a combobox",
         "args": [
             {"name": "--item", "type": str, "required": True, "help": "Item text to select"},
             {"name": "--name", "type": str, "default": None, "help": "Combobox name"},
             {"name": "--class", "type": str, "default": None, "help": "Combobox class", "dest": "class_name"},
+            {"name": "--combo-index", "type": int, "default": 0, "help": "Nth matching combobox (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact combobox name match"},
         ],
     },
     "state": {
@@ -152,7 +168,7 @@ COMMANDS = {
     # ── Mouse ──
     "double-click": {
         "func": lambda d, **kw: (
-            sk.double_click_by_name(d, kw["name"], kw.get("partial", True))
+            sk.double_click_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
             if kw.get("name") else
             sk.double_click_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
         ),
@@ -160,12 +176,13 @@ COMMANDS = {
         "args": [
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
-            {"name": "--index", "type": int, "default": 0, "help": "Nth match for --class (default 0)"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "right-click": {
         "func": lambda d, **kw: (
-            sk.right_click_by_name(d, kw["name"], kw.get("partial", True))
+            sk.right_click_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
             if kw.get("name") else
             sk.right_click_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
         ),
@@ -173,12 +190,13 @@ COMMANDS = {
         "args": [
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
-            {"name": "--index", "type": int, "default": 0, "help": "Nth match for --class (default 0)"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "hover": {
         "func": lambda d, **kw: (
-            sk.hover_by_name(d, kw["name"], kw.get("partial", True))
+            sk.hover_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
             if kw.get("name") else
             sk.hover_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
         ),
@@ -186,7 +204,8 @@ COMMANDS = {
         "args": [
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
-            {"name": "--index", "type": int, "default": 0, "help": "Nth match for --class (default 0)"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
 
@@ -248,18 +267,21 @@ COMMANDS = {
         ],
     },
     "get-text": {
-        "func": lambda d, **kw: sk.get_text_by_name(d, kw["name"]),
+        "func": lambda d, **kw: sk.get_text_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0)),
         "desc": "Read the Name text of a control (labels, headers, buttons)",
         "args": [
             {"name": "--name", "type": str, "required": True, "help": "Control name"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "find": {
-        "func": lambda d, **kw: sk.find_control(d, kw.get("name"), kw.get("class_name")),
+        "func": lambda d, **kw: sk.find_control(d, kw.get("name"), kw.get("class_name"), kw.get("partial", True)),
         "desc": "Find controls by name or class without clicking",
         "args": [
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name or class match"},
         ],
     },
     "focus": {
