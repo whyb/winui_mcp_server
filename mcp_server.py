@@ -76,13 +76,14 @@ def reset_driver() -> str:
 @mcp.tool()
 def discover(window_title: str = None, process_name: str = None,
              window_class: str = None, name: str = None,
-             control_class: str = None, depth: int = 2) -> str:
+             control_class: str = None, depth: int = 2,
+             max_nodes: int = 200) -> str:
     """Discover the UIA tree of a window or control.
     Use this to explore what controls are available before interacting.
     Shows a summary view (class, name, type) up to the given depth.
     Specify either window_title or process_name to target a window."""
     driver = get_cached_driver(window_title, process_name, window_class)
-    return _json(sk.discover_ui(driver, name, control_class, depth))
+    return _json(sk.discover_ui(driver, name, control_class, depth, False, max_nodes))
 
 
 @mcp.tool()
@@ -98,11 +99,12 @@ def describe(window_title: str = None, process_name: str = None,
 @mcp.tool()
 def dump_tree(window_title: str = None, process_name: str = None,
               window_class: str = None, name: str = None,
-              control_class: str = None, depth: int = 4) -> str:
+              control_class: str = None, depth: int = 4,
+              max_nodes: int = 500) -> str:
     """Dump the full UIA tree structure with detailed info (rect, patterns, visibility).
     Deeper and more detailed than 'discover'. Use when you need the complete picture."""
     driver = get_cached_driver(window_title, process_name, window_class)
-    return _json(sk.discover_ui(driver, name, control_class, depth))
+    return _json(sk.discover_ui(driver, name, control_class, depth, True, max_nodes))
 
 
 @mcp.tool()
@@ -123,11 +125,12 @@ def get_control_rect(window_title: str = None, process_name: str = None,
 @mcp.tool()
 def find_control(window_title: str = None, process_name: str = None,
                  window_class: str = None, name: str = None,
-                 control_class: str = None, partial: bool = True) -> str:
+                 control_class: str = None, partial: bool = True,
+                 limit: int = 20, offset: int = 0) -> str:
     """Find controls by name or class and return their info WITHOUT clicking.
     Use this to check if a control exists or to inspect multiple matches."""
     driver = get_cached_driver(window_title, process_name, window_class)
-    return _json(sk.find_control(driver, name, control_class, partial))
+    return _json(sk.find_control(driver, name, control_class, partial, limit, offset))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

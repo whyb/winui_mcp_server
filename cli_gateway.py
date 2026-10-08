@@ -63,12 +63,16 @@ def make_driver(window_title: str = None, window_class: str = None,
 
 COMMANDS = {
     "discover": {
-        "func": lambda d, **kw: sk.discover_ui(d, kw.get("name"), kw.get("class_name"), kw.get("depth", 2)),
+        "func": lambda d, **kw: sk.discover_ui(
+            d, kw.get("name"), kw.get("class_name"), kw.get("depth", 2), False,
+            kw.get("max_nodes", 200)
+        ),
         "desc": "Discover UIA tree of a window or control",
         "args": [
             {"name": "--name", "type": str, "default": None, "help": "Control name to zoom into"},
             {"name": "--class", "type": str, "default": None, "help": "Control class to zoom into", "dest": "class_name"},
             {"name": "--depth", "type": int, "default": 2, "help": "Tree depth (default 2)"},
+            {"name": "--max-nodes", "type": int, "default": 200, "help": "Maximum rendered nodes (default 200)"},
         ],
     },
     "describe": {
@@ -80,12 +84,16 @@ COMMANDS = {
         ],
     },
     "dump-tree": {
-        "func": lambda d, **kw: sk.discover_ui(d, kw.get("name"), kw.get("class_name"), kw.get("depth", 4)),
+        "func": lambda d, **kw: sk.discover_ui(
+            d, kw.get("name"), kw.get("class_name"), kw.get("depth", 4), True,
+            kw.get("max_nodes", 500)
+        ),
         "desc": "Dump full UIA tree (deeper than discover)",
         "args": [
             {"name": "--name", "type": str, "default": None, "help": "Control name to zoom into"},
             {"name": "--class", "type": str, "default": None, "help": "Control class to zoom into", "dest": "class_name"},
             {"name": "--depth", "type": int, "default": 4, "help": "Tree depth (default 4)"},
+            {"name": "--max-nodes", "type": int, "default": 500, "help": "Maximum rendered nodes (default 500)"},
         ],
     },
     "click": {
@@ -276,12 +284,17 @@ COMMANDS = {
         ],
     },
     "find": {
-        "func": lambda d, **kw: sk.find_control(d, kw.get("name"), kw.get("class_name"), kw.get("partial", True)),
+        "func": lambda d, **kw: sk.find_control(
+            d, kw.get("name"), kw.get("class_name"), kw.get("partial", True),
+            kw.get("limit", 20), kw.get("offset", 0)
+        ),
         "desc": "Find controls by name or class without clicking",
         "args": [
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
             {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name or class match"},
+            {"name": "--limit", "type": int, "default": 20, "help": "Maximum matches to return (default 20)"},
+            {"name": "--offset", "type": int, "default": 0, "help": "Match offset for paging"},
         ],
     },
     "focus": {

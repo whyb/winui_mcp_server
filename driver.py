@@ -555,8 +555,8 @@ class AppDriver:
     # ── Dynamic UIA Discovery ──
 
     @staticmethod
-    def _get_control_info(control: auto.Control) -> dict:
-        """Extract info dict from a UIA control."""
+    def _get_control_info(control: auto.Control, detailed: bool = True) -> dict:
+        """Extract compact or detailed info from a UIA control."""
         info = {
             "class": _get_class_name(control),
             "name": _get_name(control),
@@ -569,6 +569,14 @@ class AppDriver:
             info["control_type"] = control.ControlTypeName or ""
         except Exception:
             info["control_type"] = ""
+
+        if not detailed:
+            try:
+                info["visible"] = not control.IsOffscreen
+            except Exception:
+                info["visible"] = None
+            return info
+
         try:
             rect = control.BoundingRectangle
             info["rect"] = {
@@ -580,7 +588,6 @@ class AppDriver:
         except Exception:
             info["rect"] = None
             info["visible"] = False
-        # Detect supported patterns
         patterns = []
         for pname in ("Value", "Toggle", "Invoke", "ExpandCollapse",
                        "ScrollItem", "Selection", "RangeValue"):
@@ -607,19 +614,36 @@ class AppDriver:
         return result
 
     def dump_tree(self, control: auto.Control = None, max_depth: int = 3,
-                  _depth: int = 0) -> dict:
-        """Recursively dump UIA tree structure."""
+                  detailed: bool = True, max_nodes: int = 200) -> dict:
+        """Recursively dump a bounded UIA tree structure."""
         if control is None:
             control = self.window
-        info = self._get_control_info(control)
-        info["depth"] = _depth
-        if _depth < max_depth:
-            children = []
-            for child in control.GetChildren():
-                children.append(self.dump_tree(child, max_depth, _depth + 1))
-            info["children"] = children
-        else:
+        counter = {"count": 0, "truncated": False}
+        tree = self._dump_tree(control, max_depth, detailed, max_nodes, 0, counter)
+        tree["node_count"] = counter["count"]
+        tree["truncated"] = counter["truncated"]
+        return tree
+
+    def _dump_tree(self, control: auto.Control, max_depth: int, detailed: bool,
+                   max_nodes: int, depth: int, counter: dict) -> dict:
+        counter["count"] += 1
+        info = self._get_control_info(control, detailed=detailed)
+        info["depth"] = depth
+        if depth >= max_depth:
             info["child_count"] = len(control.GetChildren())
+            return info
+
+        children = control.GetChildren()
+        rendered = []
+        for index, child in enumerate(children):
+            if counter["count"] >= max_nodes:
+                counter["truncated"] = True
+                info["omitted_children"] = len(children) - index
+                break
+            rendered.append(self._dump_tree(
+                child, max_depth, detailed, max_nodes, depth + 1, counter
+            ))
+        info["children"] = rendered
         return info
 
     def find_by_name(self, name: str, control: auto.Control = None,

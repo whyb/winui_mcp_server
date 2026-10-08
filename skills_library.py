@@ -291,9 +291,12 @@ def wait_for_control(driver: AppDriver, name: str = None, class_name: str = None
 
 
 def find_control(driver: AppDriver, name: str = None, class_name: str = None,
-                 partial: bool = True) -> dict:
-    """Find controls and return their info without clicking."""
+                 partial: bool = True, limit: int = 20,
+                 offset: int = 0) -> dict:
+    """Find controls and return a bounded, compact result page."""
     try:
+        if limit < 0 or offset < 0:
+            return _fail("limit and offset must be non-negative")
         if name:
             matches = driver.find_by_name(name, partial=partial)
         elif class_name:
@@ -301,9 +304,17 @@ def find_control(driver: AppDriver, name: str = None, class_name: str = None,
         else:
             return _fail("Must specify name or class_name")
         if not matches:
-            return _fail(f"No control found")
-        results = [driver._get_control_info(c) for c in matches]
-        return _ok(f"Found {len(results)} control(s)", {"controls": results})
+            return _fail("No control found")
+        page = matches[offset:offset + limit]
+        results = [driver._get_control_info(c, detailed=False) for c in page]
+        return _ok(f"Found {len(matches)} control(s)", {
+            "total": len(matches),
+            "offset": offset,
+            "limit": limit,
+            "returned": len(results),
+            "truncated": offset + len(results) < len(matches),
+            "controls": results,
+        })
     except Exception as e:
         return _fail(f"Failed to find control: {e}")
 
@@ -370,11 +381,9 @@ def set_named_slider(driver: AppDriver, param_map: dict, parameter: str, value: 
 
 
 def discover_ui(driver: AppDriver, control_name: str = None,
-                control_class: str = None, max_depth: int = 2) -> dict:
-    """
-    Discover the UIA tree of the current window (or a named control within it).
-    Use this to explore what controls are available before interacting.
-    """
+                control_class: str = None, max_depth: int = 2,
+                detailed: bool = False, max_nodes: int = 200) -> dict:
+    """Discover a compact or detailed bounded UIA tree."""
     try:
         target = driver.window
         if control_name:
@@ -388,8 +397,14 @@ def discover_ui(driver: AppDriver, control_name: str = None,
                 return _fail(f"No control found with class containing '{control_class}'")
             target = matches[0]
 
-        tree = driver.dump_tree(target, max_depth=max_depth)
-        return _ok("UI tree discovered", {"tree": tree})
+        tree = driver.dump_tree(
+            target, max_depth=max_depth, detailed=detailed, max_nodes=max_nodes
+        )
+        return _ok("UI tree discovered", {
+            "tree": tree,
+            "detailed": detailed,
+            "max_nodes": max_nodes,
+        })
     except Exception as e:
         return _fail(f"Failed to discover UI: {e}")
 
