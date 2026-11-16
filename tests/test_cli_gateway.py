@@ -17,6 +17,31 @@ class CliGatewayTests(unittest.TestCase):
 
         list_windows.assert_called_once()
 
+    def test_window_id_is_forwarded_to_driver(self):
+        result = {"success": True, "message": "ok", "data": {}}
+        with patch.object(sys, "argv", [
+                 "cli_gateway.py", "--window-id", "0x1234", "state"
+             ]),              patch.object(cli_gateway, "AppDriver") as app_driver,              patch.object(cli_gateway.sk, "get_window_state", return_value=result),              redirect_stdout(io.StringIO()):
+            cli_gateway.main()
+
+        app_driver.assert_called_once_with(
+            window_title=None,
+            window_class=None,
+            process_name=None,
+            window_id="0x1234",
+        )
+
+    def test_click_accepts_stable_element_id(self):
+        result = {"success": True, "message": "ok", "data": {}}
+        with patch.object(sys, "argv", [
+                 "cli_gateway.py", "--window-id", "0x1234", "click",
+                 "--element-id", "e42",
+             ]),              patch.object(cli_gateway, "AppDriver"),              patch.object(cli_gateway.sk, "activate_reference", return_value=result) as action,              redirect_stdout(io.StringIO()):
+            cli_gateway.main()
+
+        self.assertEqual(action.call_args.args[1], "click")
+        self.assertEqual(action.call_args.args[2], "e42")
+
     def test_regular_command_still_requires_target(self):
         with patch.object(sys, "argv", ["cli_gateway.py", "state"]), \
              redirect_stdout(io.StringIO()) as output:

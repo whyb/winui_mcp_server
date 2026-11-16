@@ -7,8 +7,18 @@ Every skill returns {"success": bool, "message": str, "data": dict}.
 import time
 import uiautomation as auto
 
+from . import apps
 from .capture import CaptureError, capture_window
-from .driver import AppDriver, _get_name, _get_class_name, _read_value
+from .driver import (
+    AppDriver,
+    _get_class_name,
+    _get_name,
+    _get_pid_from_hwnd,
+    _get_process_name,
+    _read_value,
+    enumerate_top_level_windows,
+    format_window_id,
+)
 from .ocr import OCRError, get_ocr_engine
 from .ocr_pipeline import bind_ocr_lines, shift_ocr_lines
 
@@ -20,8 +30,19 @@ def _ok(msg: str, data: dict = None, verified: bool = None) -> dict:
     return result
 
 
-def _fail(msg: str, data: dict = None, verified: bool = None) -> dict:
-    result = {"success": False, "message": msg, "data": data or {}}
+def _fail(msg: str, data: dict = None, verified: bool = None,
+          code: str = "operation_failed", retryable: bool = False,
+          hint: str = None) -> dict:
+    result = {
+        "success": False,
+        "message": msg,
+        "data": data or {},
+        "error": {
+            "code": code,
+            "retryable": bool(retryable),
+            "hint": hint,
+        },
+    }
     if verified is not None:
         result["verified"] = verified
     return result
@@ -836,17 +857,134 @@ def long_press_key(driver: AppDriver, key: str, duration: float = 1.0) -> dict:
         return _fail(f"Failed to long-press '{key}': {e}")
 
 
-def list_windows(driver: AppDriver) -> dict:
-    """List all top-level windows on the desktop."""
+def list_windows(driver: AppDriver, visible_only: bool = False,
+                 include_hidden: bool = True) -> dict:
+    """List top-level windows with deterministic window ids and app metadata."""
     try:
         import uiautomation as auto
+
+        foreground_handle = 0
+        try:
+            foreground = auto.GetForegroundControl()
+            top = foreground.GetTopLevelControl() if foreground else None
+            foreground_handle = int(getattr(top, "NativeWindowHandle", 0) or 0)
+        except Exception:
+            pass
+
         windows = []
+        seen_handles = set()
+
+        def append_window(info, handle, pid=0, process=""):
+            if not handle or handle in seen_handles:
+                return
+            visible = bool(info.get("visible"))
+            if visible_only and not visible:
+                return
+            if not include_hidden and not visible:
+                return
+            if not process and pid:
+                process = _get_process_name(pid)
+            title = info.get("name") or info.get("title") or ""
+            profile = apps.match_profile(title, process)
+            info.update({
+                "title": title,
+                "window_id": format_window_id(handle),
+                "handle": handle,
+                "pid": pid,
+                "process_name": process,
+                "app_id": profile.id if profile else None,
+                "foreground": bool(handle == foreground_handle),
+            })
+            windows.append(info)
+            seen_handles.add(handle)
+
         for ctrl in auto.GetRootControl().GetChildren():
-            if ctrl.ControlTypeName == "WindowControl":
-                info = driver._get_control_info(ctrl)
-                info["handle"] = ctrl.NativeWindowHandle
-                windows.append(info)
-        return _ok(f"Found {len(windows)} windows", {"windows": windows})
+            if ctrl.ControlTypeName != "WindowControl":
+                continue
+            info = driver._get_control_info(ctrl)
+            handle = int(getattr(ctrl, "NativeWindowHandle", 0) or 0)
+            try:
+                pid = _get_pid_from_hwnd(handle) if handle else 0
+            except Exception:
+                pid = 0
+            append_window(info, handle, pid)
+
+        # UIA does not consistently expose UWP frames or cloaked app windows.
+        for record in enumerate_top_level_windows(visible_only=False):
+            handle = int(record.get("handle") or 0)
+            if not handle or handle in seen_handles:
+                continue
+            title = record.get("title") or ""
+            if not title and record.get("class") != "ApplicationFrameWindow":
+                continue
+            info = None
+            try:
+                ctrl = auto.ControlFromHandle(handle)
+                if ctrl is not None:
+                    info = driver._get_control_info(ctrl)
+            except Exception:
+                info = None
+            if info is None:
+                info = {
+                    "class": record.get("class", ""),
+                    "name": title,
+                    "title": title,
+                    "auto_id": "",
+                    "control_type": "WindowControl",
+                    "enabled": True,
+                    "rect": {
+                        "left": record.get("left", 0),
+                        "top": record.get("top", 0),
+                        "right": record.get("right", 0),
+                        "bottom": record.get("bottom", 0),
+                        "width": record.get("width", 0),
+                        "height": record.get("height", 0),
+                    },
+                    "visible": bool(record.get("visible")),
+                    "offscreen": not bool(record.get("visible")),
+                    "patterns": [],
+                    "interactive": False,
+                }
+            else:
+                info["name"] = info.get("name") or title
+                info["title"] = title
+                info["visible"] = bool(record.get("visible"))
+            append_window(
+                info, handle, int(record.get("pid") or 0),
+                record.get("process_name", ""),
+            )
+        uwa_titles = {
+            (item.get("title") or "").casefold()
+            for item in windows
+            if item.get("class") == "ApplicationFrameWindow"
+        }
+        windows = [
+            item for item in windows
+            if (item.get("title") or "").casefold() not in {"default ime", "msctfime ui"}
+            and not (
+                item.get("class") == "Windows.UI.Core.CoreWindow"
+                and (item.get("title") or "").casefold() in uwa_titles
+            )
+        ]
+        windows.sort(
+            key=lambda item: (
+                not item.get("foreground", False),
+                not item.get("visible", False),
+                0 if item.get("control_type") == "WindowControl" else 1,
+                (item.get("process_name") or "").casefold(),
+                (item.get("title") or "").casefold(),
+            )
+        )
+        visible_count = sum(1 for item in windows if item.get("visible"))
+        return _ok(
+            f"Found {len(windows)} window(s), {visible_count} visible",
+            {
+                "windows": windows,
+                "visible_count": visible_count,
+                "total": len(windows),
+                "hint": "Use window_id for deterministic multi-window automation.",
+            },
+        )
     except Exception as e:
         return _fail(f"Failed to list windows: {e}")
 
@@ -872,6 +1010,690 @@ def get_control_rect(driver: AppDriver, name: str = None, class_name: str = None
         return _fail(f"Failed to get rect: {e}")
 
 
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Agent-first Snapshot & Reference Actions
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _resolve_control(
+    driver: AppDriver,
+    element_id: str = None,
+    ref: str = None,
+    name: str = None,
+    control_class: str = None,
+    index: int = 0,
+    partial: bool = False,
+):
+    """Resolve an action target, preferring stable element ids over locators."""
+    if element_id:
+        return driver.resolve_element(element_id), {"element_id": element_id}
+    if ref:
+        return driver.resolve_ref(ref), {"ref": ref}
+    if name:
+        matches = driver.find_by_name(name, partial=partial)
+        if not matches:
+            raise LookupError(_hint_no_control(driver, name, "name"))
+        return _select_match(driver, matches, index, name), {
+            "name": name,
+            "index": index,
+            "match_count": len(matches),
+        }
+    if control_class:
+        matches = driver.find_by_class(control_class, partial=partial)
+        if not matches:
+            raise LookupError(_hint_no_control(driver, control_class, "class"))
+        return _select_match(driver, matches, index, control_class), {
+            "control_class": control_class,
+            "index": index,
+            "match_count": len(matches),
+        }
+    raise ValueError("Specify element_id, ref, name, or control_class")
+
+
+def activate_reference(
+    driver: AppDriver,
+    action: str = "click",
+    element_id: str = None,
+    ref: str = None,
+    name: str = None,
+    control_class: str = None,
+    index: int = 0,
+    partial: bool = False,
+) -> dict:
+    """Run a mouse action against a stable element id or legacy locator."""
+    try:
+        ctrl, target = _resolve_control(
+            driver, element_id, ref, name, control_class, index, partial
+        )
+        info = driver._get_control_info(ctrl)
+        action_name = (action or "").strip().lower()
+        method_names = {
+            "click": "click_control",
+            "double_click": "double_click_control",
+            "right_click": "right_click_control",
+            "hover": "hover_control",
+        }
+        if action_name not in method_names:
+            return _fail(
+                f"Unsupported element action {action!r}. "
+                "Use click, double_click, right_click, or hover."
+            )
+        getattr(driver, method_names[action_name])(ctrl)
+        label = info.get("name") or info.get("auto_id") or element_id or ref
+        data = {"control": info, "target": target, "action": action_name}
+        return _ok(
+            f"{action_name.replace('_', ' ').title()} '{label}'; verify with snapshot",
+            data,
+            verified=False,
+        )
+    except Exception as exc:
+        return _fail(f"Element action failed: {exc}")
+
+
+def get_value_by_reference(
+    driver: AppDriver,
+    element_id: str = None,
+    ref: str = None,
+    name: str = None,
+    control_class: str = None,
+    index: int = 0,
+    partial: bool = False,
+) -> dict:
+    """Read ValuePattern or Name through an element id or legacy locator."""
+    try:
+        ctrl, target = _resolve_control(
+            driver, element_id, ref, name, control_class, index, partial
+        )
+        info = driver._get_control_info(ctrl)
+        value = _read_value(ctrl)
+        if value is None:
+            value = _get_name(ctrl)
+        return _ok(
+            f"Read value from '{info.get('name') or element_id or ref}'",
+            {"control": info, "target": target, "value": value},
+        )
+    except Exception as exc:
+        return _fail(f"Failed to get value: {exc}")
+
+
+def set_value_by_reference(
+    driver: AppDriver,
+    value: str,
+    element_id: str = None,
+    ref: str = None,
+    name: str = None,
+    control_class: str = None,
+    index: int = 0,
+    partial: bool = False,
+) -> dict:
+    """Set a value through an element id or legacy locator and verify it."""
+    try:
+        ctrl, target = _resolve_control(
+            driver, element_id, ref, name, control_class, index, partial
+        )
+        info = driver._get_control_info(ctrl)
+        state = driver.set_value_by_control(ctrl, value)
+        data = {
+            "control": info,
+            "target": target,
+            "requested_value": value,
+            "verified_value": state,
+        }
+        if state is False:
+            return _fail("Value did not change to the requested value", data, verified=True)
+        if state is None:
+            return _ok("Value sent, but the control does not expose verification", data, verified=False)
+        return _ok("Value set and verified", data, verified=True)
+    except Exception as exc:
+        return _fail(f"Failed to set value: {exc}")
+
+
+def type_text_by_reference(
+    driver: AppDriver,
+    text: str,
+    element_id: str = None,
+    ref: str = None,
+    name: str = None,
+    control_class: str = None,
+    index: int = 0,
+    partial: bool = False,
+) -> dict:
+    """Type into an element id/locator, or the focused control when omitted."""
+    try:
+        ctrl = None
+        target = {"mode": "focused"}
+        if element_id or ref or name or control_class:
+            ctrl, target = _resolve_control(
+                driver, element_id, ref, name, control_class, index, partial
+            )
+        driver.type_text(text, ctrl)
+        info = driver._get_control_info(ctrl) if ctrl is not None else None
+        actual = _read_value(ctrl) if ctrl is not None else None
+        verified = text in actual if actual is not None else None
+        data = {"control": info, "target": target, "verified_value": verified}
+        if verified is True:
+            return _ok("Text typed and verified", data, verified=True)
+        return _ok("Text typed; verify with a snapshot or get_value", data, verified=False)
+    except Exception as exc:
+        return _fail(f"Failed to type text: {exc}")
+
+
+def toggle_by_reference(
+    driver: AppDriver,
+    enable: bool = None,
+    element_id: str = None,
+    ref: str = None,
+    name: str = None,
+    control_class: str = None,
+    index: int = 0,
+    partial: bool = False,
+) -> dict:
+    """Set or flip a toggle control through a stable element id or locator."""
+    try:
+        ctrl, target = _resolve_control(
+            driver, element_id, ref, name, control_class, index, partial
+        )
+        info = driver._get_control_info(ctrl)
+        desired = enable
+        if desired is None:
+            try:
+                current = ctrl.GetTogglePattern().ToggleState
+                desired = current != 1
+            except Exception:
+                desired = True
+        state = driver.toggle_checkbox_by_control(ctrl, bool(desired))
+        data = {
+            "control": info,
+            "target": target,
+            "requested_state": bool(desired),
+            "actual_state": state,
+        }
+        if state is False:
+            return _fail("Toggle state does not match the requested state", data, verified=True)
+        if state is None:
+            return _ok("Toggle sent, but state could not be verified", data, verified=False)
+        return _ok(
+            f"Toggle set to {'on' if desired else 'off'} and verified",
+            data,
+            verified=True,
+        )
+    except Exception as exc:
+        return _fail(f"Failed to toggle control: {exc}")
+
+
+def combo_select_by_reference(
+    driver: AppDriver,
+    item_text: str,
+    element_id: str = None,
+    ref: str = None,
+    name: str = None,
+    control_class: str = None,
+    index: int = 0,
+    partial: bool = False,
+) -> dict:
+    """Select a combobox item through a stable element id or locator."""
+    try:
+        ctrl, target = _resolve_control(
+            driver, element_id, ref, name, control_class, index, partial
+        )
+        info = driver._get_control_info(ctrl)
+        state = driver.select_combobox_item_by_control(ctrl, item_text)
+        data = {
+            "control": info,
+            "target": target,
+            "requested_item": item_text,
+            "selected": state,
+        }
+        if state is False:
+            return _fail("Combobox item was not selected", data, verified=True)
+        if state is None:
+            return _ok("Selection sent, but it could not be verified", data, verified=False)
+        return _ok("Combobox item selected and verified", data, verified=True)
+    except Exception as exc:
+        return _fail(f"Failed to select combobox item: {exc}")
+
+
+def scroll_by_reference(
+    driver: AppDriver,
+    direction: str = "down",
+    count: int = 3,
+    element_id: str = None,
+    ref: str = None,
+    name: str = None,
+    control_class: str = None,
+    index: int = 0,
+    partial: bool = False,
+) -> dict:
+    """Scroll a stable element or the bound window."""
+    try:
+        if count < 1 or count > 50:
+            return _fail("count must be between 1 and 50")
+        ctrl = None
+        target = {"mode": "window"}
+        if element_id or ref or name or control_class:
+            ctrl, target = _resolve_control(
+                driver, element_id, ref, name, control_class, index, partial
+            )
+        if direction.casefold() == "up":
+            driver.scroll_up(ctrl, count)
+        elif direction.casefold() == "down":
+            driver.scroll_down(ctrl, count)
+        else:
+            return _fail("direction must be 'up' or 'down'")
+        return _ok(
+            f"Scrolled {direction} {count} time(s)",
+            {"direction": direction, "count": count, "target": target},
+            verified=False,
+        )
+    except Exception as exc:
+        return _fail(f"Failed to scroll: {exc}")
+
+
+def _snapshot_item(node: dict) -> dict:
+    """Convert a detailed tree node into a compact agent-facing element."""
+    value = node.get("value")
+    effective_text = node.get("effective_text") or value or node.get("name") or ""
+    item = {
+        "element_id": node.get("element_id"),
+        "ref": node.get("ref"),
+        "role": str(node.get("control_type") or "").replace("Control", "") or node.get("class"),
+        "control_type": node.get("control_type", ""),
+        "class": node.get("class", ""),
+        "name": node.get("name", ""),
+        "text": effective_text,
+        "auto_id": node.get("auto_id", ""),
+        "interactive": bool(node.get("interactive")),
+        "enabled": node.get("enabled"),
+        "visible": node.get("visible"),
+        "offscreen": node.get("offscreen"),
+        "patterns": node.get("patterns", []),
+        "depth": node.get("depth", 0),
+    }
+    if value not in (None, ""):
+        item["value"] = value
+    if node.get("ocr_text"):
+        item["ocr_text"] = node["ocr_text"]
+        item["ocr_confidence"] = node.get("ocr_confidence")
+        item["text_source"] = node.get("text_source")
+    if node.get("children"):
+        item["child_count"] = len(node["children"])
+    if node.get("omitted_children"):
+        item["omitted_children"] = node["omitted_children"]
+    return item
+
+
+def _flatten_snapshot(tree: dict, interactive_only: bool = True,
+                      query: str = None, limit: int = 300) -> tuple[list, bool]:
+    """Flatten a detailed UIA tree into a bounded list of useful elements."""
+    query_folded = query.casefold().strip() if query else ""
+    items = []
+    truncated = {"value": False}
+
+    def walk(node, depth=0):
+        if truncated["value"]:
+            return
+        haystack = " ".join(
+            str(node.get(key) or "")
+            for key in ("name", "value", "effective_text", "ocr_text", "auto_id", "class", "control_type")
+        ).casefold()
+        query_match = not query_folded or query_folded in haystack
+        interactive = bool(node.get("interactive"))
+        include = depth > 0 and query_match and (
+            not interactive_only or interactive or bool(query_folded)
+        )
+        if include:
+            items.append(_snapshot_item(node))
+            if len(items) >= limit:
+                truncated["value"] = True
+                return
+        for child in node.get("children", []) or []:
+            walk(child, depth + 1)
+            if truncated["value"]:
+                return
+
+    walk(tree, 0)
+    return items, truncated["value"]
+
+
+def snapshot(
+    driver: AppDriver,
+    depth: int = 20,
+    max_nodes: int = 300,
+    interactive_only: bool = True,
+    query: str = None,
+    include_ocr: bool = False,
+) -> dict:
+    """Return a compact, agent-oriented snapshot of the bound window."""
+    try:
+        if not 0 <= depth <= 20:
+            return _fail("depth must be between 0 and 20")
+        if not 1 <= max_nodes <= 2000:
+            return _fail("max_nodes must be between 1 and 2000")
+        if query and len(query) > 500:
+            return _fail("query must be 500 characters or fewer")
+
+        if include_ocr:
+            scanned = _ocr_scan_impl(
+                driver, max_depth=depth, max_nodes=max_nodes,
+                min_det_confidence=0.3, min_text_confidence=0.45,
+                max_lines=0, element_ids=True,
+            )
+            if not scanned.get("success"):
+                return scanned
+            tree = scanned["data"]["tree"]
+        else:
+            driver.reset_element_refs()
+            tree = driver.dump_tree(
+                driver.window,
+                max_depth=depth,
+                detailed=True,
+                max_nodes=max_nodes,
+                element_ids=True,
+            )
+
+        elements, result_truncated = _flatten_snapshot(
+            tree, interactive_only=interactive_only, query=query, limit=max_nodes
+        )
+        state = get_window_state(driver)
+        window = state.get("data", {}) if state.get("success") else {}
+        process_name = driver.process_name
+        profile = apps.match_profile(window.get("title"), process_name)
+        data = {
+            "window": {
+                **window,
+                "window_id": driver.window_id,
+                "process_name": process_name,
+                "app_id": profile.id if profile else None,
+            },
+            "app": (
+                {
+                    "id": profile.id,
+                    "name": profile.name,
+                    "workflow": list(profile.workflow),
+                    "tips": list(profile.tips),
+                }
+                if profile else None
+            ),
+            "elements": elements,
+            "stats": {
+                "tree_nodes": tree.get("node_count", 0),
+                "returned_elements": len(elements),
+                "tree_truncated": bool(tree.get("truncated")),
+                "result_truncated": result_truncated,
+                "interactive_only": interactive_only,
+                "query": query,
+                "include_ocr": include_ocr,
+                "generation": driver._snapshot_generation,
+            },
+            "hint": (
+                "Act with element_id from this result. If the UI changes or an id "
+                "is stale, call snapshot again. Narrow large UIs with query."
+            ),
+        }
+        if not elements:
+            data["hint"] = (
+                "No matching elements were returned. Retry with "
+                "interactive_only=false, a broader query, or a greater depth."
+            )
+        return _ok(
+            f"Snapshot returned {len(elements)} element(s) from {tree.get('node_count', 0)} node(s)",
+            data,
+        )
+    except Exception as exc:
+        return _fail(f"Failed to create snapshot: {exc}")
+
+
+def run_actions(
+    driver: AppDriver,
+    steps: list[dict],
+    stop_on_error: bool = True,
+    snapshot_after: bool = True,
+) -> dict:
+    """Execute a bounded sequence of actions with one MCP round trip."""
+    if not isinstance(steps, list) or not steps:
+        return _fail("steps must be a non-empty list")
+    if len(steps) > 50:
+        return _fail("At most 50 actions can be executed in one call")
+    results = []
+    failed = False
+
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            result = _fail("Each action must be an object")
+        else:
+            action = str(step.get("action") or "").strip().lower()
+            element_id = step.get("element_id")
+            ref = step.get("ref")
+            name = step.get("name")
+            control_class = step.get("control_class")
+            match_index = int(step.get("index", 0) or 0)
+            partial = bool(step.get("partial", False))
+            try:
+                if action in {"click", "double_click", "right_click", "hover"}:
+                    result = activate_reference(
+                        driver, action, element_id, ref, name, control_class,
+                        match_index, partial,
+                    )
+                elif action == "type_text":
+                    result = type_text_by_reference(
+                        driver, str(step.get("text", "")), element_id, ref,
+                        name, control_class, match_index, partial,
+                    )
+                elif action == "set_value":
+                    result = set_value_by_reference(
+                        driver, str(step.get("value", "")), element_id, ref,
+                        name, control_class, match_index, partial,
+                    )
+                elif action == "get_value":
+                    result = get_value_by_reference(
+                        driver, element_id, ref, name, control_class,
+                        match_index, partial,
+                    )
+                elif action in {"key", "press_key"}:
+                    result = send_key(driver, str(step.get("key", "")))
+                elif action == "hotkey":
+                    result = send_hotkey(driver, str(step.get("keys", "")))
+                elif action == "wait":
+                    result = wait_for_control(
+                        driver,
+                        name=name,
+                        class_name=control_class,
+                        timeout=float(step.get("timeout", 10)),
+                        disappear=bool(step.get("disappear", False)),
+                        actionable=bool(step.get("actionable", True)),
+                        stable=bool(step.get("stable", True)),
+                        partial=partial,
+                    )
+                elif action == "sleep":
+                    seconds = max(0.0, min(float(step.get("seconds", 0.5)), 10.0))
+                    time.sleep(seconds)
+                    result = _ok(f"Slept for {seconds:.2f}s", {"seconds": seconds})
+                elif action == "focus_window":
+                    result = focus_window(driver)
+                else:
+                    result = _fail(
+                        f"Unsupported action {action!r}. Supported actions: click, "
+                        "double_click, right_click, hover, type_text, set_value, "
+                        "get_value, key, hotkey, wait, sleep, focus_window."
+                    )
+            except Exception as exc:
+                result = _fail(f"Action failed: {exc}")
+
+        result["step"] = index
+        result["action"] = step.get("action") if isinstance(step, dict) else None
+        results.append(result)
+        if not result.get("success"):
+            failed = True
+            if stop_on_error:
+                break
+
+    data = {
+        "actions": results,
+        "completed": sum(1 for item in results if item.get("success")),
+        "failed": sum(1 for item in results if not item.get("success")),
+        "stopped_early": failed and stop_on_error and len(results) < len(steps),
+    }
+    if snapshot_after and not failed:
+        final_snapshot = snapshot(driver, max_nodes=200, interactive_only=True)
+        data["snapshot"] = final_snapshot.get("data") if final_snapshot.get("success") else final_snapshot
+    if failed:
+        return _fail("One or more actions failed", data)
+    return _ok(f"Completed {len(results)} action(s)", data)
+
+
+
+
+def launch_app(driver: AppDriver, app: str, arguments: str = None,
+               timeout: float = 12) -> dict:
+    """Launch a catalog app and bind the resulting window without exposing paths."""
+    try:
+        import uiautomation as auto
+
+        profile = apps.get_profile(app)
+        baseline = {
+            int(record.get("handle") or 0)
+            for record in enumerate_top_level_windows(visible_only=False)
+        }
+
+        plan = apps.launch_application(app, arguments)
+        deadline = time.time() + max(1.0, min(float(timeout), 60.0))
+        fallback = None
+        while time.time() < deadline:
+            candidates = []
+            for record in enumerate_top_level_windows(visible_only=True):
+                try:
+                    handle = int(record.get("handle") or 0)
+                    title = record.get("title") or ""
+                    if not handle or not title:
+                        continue
+                    pid = int(record.get("pid") or 0)
+                    process = record.get("process_name") or ""
+                    ctrl = auto.ControlFromHandle(handle)
+                    info = (
+                        driver._get_control_info(ctrl)
+                        if ctrl is not None
+                        else {
+                            "class": record.get("class", ""),
+                            "name": title,
+                            "title": title,
+                            "auto_id": "",
+                            "control_type": "WindowControl",
+                            "enabled": True,
+                            "visible": bool(record.get("visible")),
+                            "rect": {
+                                "left": record.get("left", 0),
+                                "top": record.get("top", 0),
+                                "right": record.get("right", 0),
+                                "bottom": record.get("bottom", 0),
+                                "width": record.get("width", 0),
+                                "height": record.get("height", 0),
+                            },
+                        }
+                    )
+                    info["name"] = info.get("name") or title
+                    info["title"] = title
+                    info["visible"] = bool(record.get("visible"))
+                    profile_match = apps.match_profile(title, process)
+                    process_match = process.casefold() in profile.process_names
+                    title_match = any(
+                        term.casefold() in title.casefold()
+                        for term in (profile.name, *profile.aliases)
+                    )
+                    candidate = {
+                        "window": {
+                            **info,
+                            "title": title,
+                            "window_id": format_window_id(handle),
+                            "pid": pid,
+                            "process_name": process,
+                            "app_id": profile_match.id if profile_match else None,
+                        },
+                        "new": handle not in baseline,
+                        "score": (
+                            (8 if process_match else 0)
+                            + (4 if title_match else 0)
+                            + (3 if info.get("control_type") == "WindowControl" else 0)
+                        ),
+                    }
+                    if profile_match and profile_match.id == profile.id:
+                        candidates.append(candidate)
+                    elif handle not in baseline and (process_match or title_match):
+                        candidates.append(candidate)
+                    elif fallback is None and process_match:
+                        fallback = candidate
+                except Exception:
+                    continue
+            if candidates:
+                candidates.sort(key=lambda item: (not item["new"], -item["score"]))
+                chosen = candidates[0]
+                return _ok(
+                    f"Launched {profile.name} and bound its window",
+                    {
+                        "app": {"id": profile.id, "name": profile.name},
+                        "window": chosen["window"],
+                        "new_window": chosen["new"],
+                        "reused_window": not chosen["new"],
+                        "launch_kind": plan.kind,
+                        "hint": "Call snapshot with this window_id before acting.",
+                    },
+                )
+            time.sleep(0.25)
+
+        if fallback:
+            return _ok(
+                f"Launched {profile.name}; an existing app window is available",
+                {
+                    "app": {"id": profile.id, "name": profile.name},
+                    "window": fallback["window"],
+                    "new_window": False,
+                    "reused_window": True,
+                    "launch_kind": plan.kind,
+                    "hint": "Call snapshot with this window_id before acting.",
+                },
+                verified=False,
+            )
+        return _fail(
+            f"Launch command was sent for {profile.name}, but no matching visible window "
+            f"appeared within {timeout}s. Call list_windows to inspect open windows.",
+            {"app": {"id": profile.id, "name": profile.name}, "launch_kind": plan.kind},
+            verified=False,
+        )
+    except Exception as exc:
+        return _fail(f"Failed to launch application: {exc}")
+
+
+def window_action(driver: AppDriver, action: str = "focus") -> dict:
+    """Focus, minimize, maximize, restore, or close the bound window."""
+    try:
+        action_name = (action or "focus").strip().lower()
+        win = driver.window
+        window_id = driver.window_id
+        title = _get_name(win)
+        if action_name == "focus":
+            driver.focus()
+        elif action_name == "minimize":
+            win.Minimize()
+        elif action_name == "maximize":
+            win.Maximize()
+        elif action_name == "restore":
+            win.Restore()
+        elif action_name == "close":
+            driver.close_window()
+        else:
+            return _fail(
+                f"Unsupported window action {action!r}. "
+                "Use focus, minimize, maximize, restore, or close."
+            )
+        return _ok(
+            f"Window action '{action_name}' completed",
+            {"action": action_name, "window_id": window_id, "title": title},
+            verified=False,
+        )
+    except Exception as exc:
+        return _fail(f"Window action failed: {exc}")
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # OCR Discovery & Annotated Tree
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -880,7 +1702,8 @@ def get_control_rect(driver: AppDriver, name: str = None, class_name: str = None
 def _ocr_scan_impl(driver: AppDriver, max_depth: int = 4, max_nodes: int = 500,
                    min_det_confidence: float = 0.3,
                    min_text_confidence: float = 0.45,
-                   max_lines: int = 0) -> dict:
+                   max_lines: int = 0,
+                   element_ids: bool = True) -> dict:
     """Capture the bound window, OCR it, and bind lines to UIA nodes."""
     try:
         window = driver.window
@@ -890,8 +1713,11 @@ def _ocr_scan_impl(driver: AppDriver, max_depth: int = 4, max_nodes: int = 500,
                 time.sleep(0.2)
         except Exception:
             pass
+        if element_ids:
+            driver.reset_element_refs()
         tree = driver.dump_tree(
-            window, max_depth=max_depth, detailed=True, max_nodes=max_nodes
+            window, max_depth=max_depth, detailed=True,
+            max_nodes=max_nodes, element_ids=element_ids,
         )
         hwnd = getattr(driver, "_hwnd", 0) or getattr(window, "NativeWindowHandle", 0)
         capture = capture_window(hwnd)
@@ -935,7 +1761,8 @@ def _ocr_scan_impl(driver: AppDriver, max_depth: int = 4, max_nodes: int = 500,
 def ocr_scan(driver: AppDriver, max_depth: int = 4, max_nodes: int = 500,
              min_det_confidence: float = 0.3,
              min_text_confidence: float = 0.45,
-             max_lines: int = 0) -> dict:
+             max_lines: int = 0,
+             element_ids: bool = True) -> dict:
     """Public OCR scan skill used by CLI and MCP."""
     return _ocr_scan_impl(
         driver,
@@ -944,6 +1771,7 @@ def ocr_scan(driver: AppDriver, max_depth: int = 4, max_nodes: int = 500,
         min_det_confidence=min_det_confidence,
         min_text_confidence=min_text_confidence,
         max_lines=max_lines,
+        element_ids=element_ids,
     )
 
 

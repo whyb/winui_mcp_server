@@ -1,6 +1,3 @@
-/ppocrv5.h
-/ppocrv5.cpp
-/models/
 /__pycache__/
 /.vscode/
 /AccessibilityInsights/
@@ -12,3 +9,6 @@
 /dist/
 /build/
 __pycache__/
+
+@AutomationLog.txt
+AutomationLog*.txt

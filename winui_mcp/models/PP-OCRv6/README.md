@@ -15,7 +15,7 @@ These files are bundled so `ocr_scan` works offline after installing
 
 - Detection and recognition use ONNX Runtime.
 - Image preprocessing, DB-style post-processing, rotated crops, and CTC decoding use OpenCV.
-- The Python implementation follows the PP-OCRv5 C++ reference pre/post-processing because PP-OCRv5 and PP-OCRv6 share the same inference contract.
+- Detection and recognition preprocessing are implemented directly for the PP-OCRv6 inference contract.
 - Set `WINUI_OCR_MODEL_DIR` to override the bundled model directory.
 - Set `WINUI_OCR_PROVIDERS` to a comma-separated ONNX Runtime provider list when a compatible execution provider is installed. The default is `CPUExecutionProvider`.
 

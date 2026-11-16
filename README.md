@@ -1,92 +1,87 @@
 # WinUI MCP Server
 
 <p align="center">
-    <a href="https://pypi.org/project/winui-mcp-server">
-        <img src="https://badgen.net/pypi/v/winui-mcp-server?color=yellow" />
-    </a>
-    <a href="https://pypi.org/project/winui-mcp-server">
-    <a href="https://pypistats.org/packages/winui-mcp-server">
-        <img src="https://static.pepy.tech/badge/winui-mcp-server" />
-    </a>
+  <a href="https://pypi.org/project/winui-mcp-server">
+    <img src="https://badgen.net/pypi/v/winui-mcp-server?color=yellow" alt="PyPI version">
+  </a>
+  <a href="https://pypistats.org/packages/winui-mcp-server">
+    <img src="https://static.pepy.tech/badge/winui-mcp-server" alt="PyPI downloads">
+  </a>
 </p>
 
 > [中文文档](README.cn.md)
 
-An MCP (Model Context Protocol) server that enables AI agents to control **any Windows desktop application** through UI Automation. No screen coordinates needed — controls are located by their class hierarchy, names, or OCR-derived text attached directly to each control.
+WinUI MCP Server gives AI agents semantic control of Windows desktop applications
+through the Model Context Protocol. It is designed for **Codex, Claude Code,
+OpenCode, Cline, GitHub Copilot, Kimi Code, DeepSeek Harness**, and any other MCP
+client that supports stdio tools.
 
-## What It Does
+The server uses UI Automation first and bundles local PP-OCRv6 models as a
+fallback when accessible labels are missing. It works with built-in apps, UWP
+apps, Win32 apps, Chromium browsers, and Electron applications such as VS Code.
 
-This server exposes 26 tools that let your AI agent:
+## Agent-first design
 
-- **Discover** — explore the UIA tree of any window to find controls
-- **OCR bind** — recognize visible text and attach it to the correct UIA controls when accessible names are missing
-- **Click / Double-click / Right-click / Hover** — interact with controls by name or class
-- **Type / Send keys / Hotkeys** — keyboard input to any focused or targeted control
-- **Scroll** — scroll up/down on a control or window
-- **Read / Set values** — get or set text fields, spinboxes, checkboxes, comboboxes
-- **Wait** — wait for a control to appear or disappear (async UI)
-- **Window management** — list windows, get window state, focus, restore minimized windows
+The 0.4 release is optimized around agent reliability rather than raw UIA calls:
 
-Every tool returns structured JSON: `{"success": bool, "message": str, "data": dict}`.
+- **Stable window ids** from `list_windows` and `launch_app` remove ambiguity when
+  several processes or windows share a title.
+- **Snapshot-scoped element ids** replace brittle tree paths for normal actions.
+- **Compact snapshots** expose actionable controls, text, values, patterns, and
+  visibility without forcing an agent to recurse through a large raw tree.
+- **Application profiles** provide path-free launch discovery and workflow hints
+  for Notepad, Calculator, Paint, Settings, Explorer, VS Code, Edge, Chrome, and
+  Media Player.
+- **Portable discovery** uses `PATH`, Windows `App Paths`, and registered URI
+  protocols. The repository contains no machine-specific install paths.
+- **Structured MCP results** include `success`, `message`, `data`, optional
+  `verified`, and machine-readable `error` metadata.
+- **Batch actions** reduce round trips with `run_actions` while preserving a final
+  observation.
+- **Real integration tests** run a fresh MCP stdio process for every test, so
+  development changes reload the same way a real client does.
 
-## Prerequisites
+## Requirements
 
-- **Windows 10/11**
-- **Python 3.10+**
-- **[uv](https://docs.astral.sh/uv/)** — fast Python package manager (`pip install uv`)
-- **Bundled PP-OCRv6 tiny models** — OCR runs locally through ONNX Runtime and OpenCV; no model download or cloud service is required
+- Windows 10 or Windows 11
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/)
+- Network access only for installation; OCR and automation run locally
 
-## Setup
+## Install
 
-### Install uv (if not already installed)
-
-```bash
-pip install uv
-```
-
-### Install the package
-
-```bash
-git clone https://github.com/whyb/winui_mcp_server.git
-cd winui_mcp_server
-
-uv sync
-```
-
-Or install directly from PyPI (once published):
+Install as a standalone MCP server tool:
 
 ```bash
 uv tool install winui-mcp-server
 ```
 
-## Install as MCP Server
+Or run directly without a persistent tool install:
 
-The server runs via **stdio** transport. Below are configuration instructions for every major agent client.
-
----
-
-### Claude Code
-
-Add to your project's `.claude/settings.json` or global `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
+```bash
+uvx winui-mcp-server
 ```
 
-Restart Claude Code. The `winui` tools will appear in your tool list.
+For development from a checkout:
 
----
+```bash
+git clone https://github.com/whyb/winui_mcp_server.git
+cd winui_mcp_server
+uv sync --extra dev
+```
 
-### Codex (OpenAI)
+## Configure an MCP client
 
-In your Codex project, create or edit `.codex/config.toml`:
+The transport is standard MCP stdio:
+
+```text
+command: uvx
+args:    ["winui-mcp-server"]
+```
+
+Common configurations:
+
+### Codex
 
 ```toml
 [mcp_servers.winui]
@@ -94,37 +89,7 @@ command = "uvx"
 args = ["winui-mcp-server"]
 ```
 
-Restart Codex to pick up the new server.
-
----
-
-### Cline (VS Code Extension)
-
-1. Open VS Code with the Cline extension installed.
-2. Open Cline's MCP settings (gear icon in the Cline panel).
-3. Add a new MCP server with the following configuration:
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"],
-      "disabled": false
-    }
-  }
-}
-```
-
-Alternatively, edit the Cline MCP settings file directly at:
-- **Windows**: `%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
-- **macOS**: `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
-
----
-
-### OpenCode
-
-Edit `~/.opencode/config.json`:
+### Claude Code
 
 ```json
 {
@@ -137,35 +102,29 @@ Edit `~/.opencode/config.json`:
 }
 ```
 
----
+### OpenCode V2
 
-### Trae (ByteDance)
-
-1. Open Trae IDE.
-2. Go to **Settings > MCP Servers**.
-3. Add a new server with:
-
-```json
+```jsonc
 {
-  "winui": {
-    "command": "uvx",
-    "args": ["winui-mcp-server"]
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "winui": {
+        "type": "local",
+        "command": ["uvx", "winui-mcp-server"]
+      }
+    }
   }
 }
 ```
 
-Or edit the Trae MCP config file directly (location varies by OS, typically under the Trae user data directory).
-
----
-
-### Antigravity
-
-Edit your Antigravity MCP configuration file:
+### VS Code / GitHub Copilot
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "winui": {
+      "type": "stdio",
       "command": "uvx",
       "args": ["winui-mcp-server"]
     }
@@ -173,247 +132,190 @@ Edit your Antigravity MCP configuration file:
 }
 ```
 
----
+See [docs/CLIENTS.md](docs/CLIENTS.md) for Cline, local development, and generic
+client guidance.
 
-### GitHub Copilot (VS Code)
+## Recommended agent loop
 
-GitHub Copilot supports MCP in agent mode. Add to your VS Code `settings.json`:
+1. `launch_app` for a supported app, or `list_windows` for an existing app.
+2. Use the returned `window_id`.
+3. Call `snapshot`. Use `query` to narrow large UI trees.
+4. Act with `element_id` from the latest snapshot.
+5. Verify with another snapshot, `get_value`, `get_text`, or `wait_for`.
+6. Re-snapshot after navigation or any UI change.
+
+The server sends this workflow through MCP initialization instructions. It is
+also exposed as the `winui://guide` resource, the `automate_windows_task` prompt,
+and the portable [WinUI automation skill](skills/winui-automation/SKILL.md).
+
+Read the full [agent guide](docs/AGENT_GUIDE.md).
+
+## Example agent requests
+
+- "Launch Notepad with a new temporary file, type a short note, and verify it."
+- "Open Settings to the display page and describe the available controls."
+- "In Edge, open a URL and click the sign-in button without using coordinates."
+- "Find the Save command in VS Code and report whether it is enabled."
+- "Open Calculator, calculate 19 × 23, and read the result."
+- "Inspect every open Explorer window and choose the one matching a folder name."
+- "OCR-fallback this app's toolbar because its buttons have no accessible names."
+
+## Tool surface
+
+| Category | Tools |
+|---|---|
+| Applications | `list_apps`, `launch_app` |
+| Windows | `list_windows`, `get_window_state`, `focus_window`, `window_action`, `reset_driver` |
+| Observation | `snapshot`, `ocr_scan`, `find_control`, `wait_for` |
+| Legacy discovery | `discover`, `describe`, `dump_tree`, `get_control_rect` |
+| Mouse | `click`, `double_click`, `right_click`, `hover` |
+| Scrolling | `scroll_up`, `scroll_down` |
+| Keyboard | `send_key`, `send_hotkey`, `long_press_key`, `type_text` |
+| Values | `get_value`, `get_text`, `set_value`, `toggle`, `combo_select` |
+| Workflow | `run_actions` |
+
+### Stable element ids
+
+A snapshot returns compact elements such as:
 
 ```json
 {
-  "github.copilot.chat.mcp.servers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
+  "element_id": "e42",
+  "role": "Button",
+  "name": "Save",
+  "text": "Save",
+  "auto_id": "saveButton",
+  "interactive": true,
+  "enabled": true,
+  "patterns": ["Invoke"]
+}
+```
+
+Pass `e42` to `click` or `run_actions`. If the UI changes, the old id becomes
+stale and the server asks for a new snapshot rather than silently clicking the
+wrong control.
+
+## Result contract
+
+```json
+{
+  "success": true,
+  "message": "Value set and verified",
+  "data": {},
+  "verified": true
+}
+```
+
+Failures include:
+
+```json
+{
+  "success": false,
+  "message": "Element id is stale",
+  "data": {},
+  "error": {
+    "code": "operation_failed",
+    "retryable": false,
+    "hint": "Call snapshot again before acting."
   }
 }
 ```
 
-Or use the VS Code settings UI: search for `github.copilot.chat.mcp.servers` and add the server entry.
+MCP clients receive both readable text content and structured tool content.
 
-> **Note:** MCP support in GitHub Copilot requires VS Code 1.99+ and Copilot Chat in agent mode.
+## OCR fallback
 
----
+When accessible text is missing:
 
-### Qoder
-
-Edit your Qoder MCP settings:
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
+```text
+snapshot(window_id="0x1234", include_ocr=true, query="Save")
 ```
 
----
+The bundled PP-OCRv6 tiny detector and recognizer run locally through ONNX
+Runtime. OCR text is spatially bound to the smallest containing UIA control. No
+image or text is sent to an external OCR service.
 
-### CodeBuddy
+## CLI
 
-Edit your CodeBuddy MCP configuration:
+The same engine is available without an MCP client:
 
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
-```
-
----
-
-### Cursor
-
-Edit `.cursor/mcp.json` in your project or `~/.cursor/mcp.json` globally:
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
-```
-
----
-
-### Windsurf
-
-Edit `~/.codeium/windsurf/mcp_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
-```
-
----
-
-### Any MCP Client (Generic)
-
-This server uses **stdio** transport and follows the standard MCP protocol. For any client that supports MCP:
-
-| Property | Value |
-|----------|-------|
-| Transport | `stdio` |
-| Command | `uvx` |
-| Args | `["winui-mcp-server"]` |
-| Server name | `winui` |
-
-## Available Tools (26)
-
-| Category | Tool | Description |
-|----------|------|-------------|
-| **Window** | `list_windows` | List all top-level windows on the desktop |
-| | `get_window_state` | Get window position, size, minimized state |
-| | `focus_window` | Bring a window to the foreground |
-| | `reset_driver` | Clear cached window bindings |
-| **Discovery** | `discover` | Explore a bounded compact UIA tree (default depth 2) |
-| | `describe` | List direct children with class, name, patterns |
-| | `dump_tree` | Bounded detailed UIA tree dump (default depth 4) |
-| | `ocr_scan` | OCR visible text and bind it to UIA tree nodes |
-| | `get_control_rect` | Get bounding rectangle of a control |
-| | `find_control` | Find a bounded page of controls by name/class |
-| **Mouse** | `click` | Click a control by ref, name, or class |
-| | `double_click` | Double-click a control by ref, name, or class |
-| | `right_click` | Right-click a control by ref, name, or class |
-| | `hover` | Hover over a control by ref, name, or class |
-| **Scroll** | `scroll_up` | Scroll up on a control or window |
-| | `scroll_down` | Scroll down on a control or window |
-| **Keyboard** | `send_key` | Send a single key press |
-| | `send_hotkey` | Send a key combination (e.g. Ctrl+c) |
-| | `long_press_key` | Hold a key for a duration |
-| | `type_text` | Type text into a control |
-| **Value** | `get_value` | Read value of an edit/spinbox (ValuePattern) |
-| | `get_text` | Read Name text of a control (labels, buttons) |
-| | `set_value` | Set value of an edit/spinbox |
-| | `toggle` | Toggle a checkbox/switch (force on/off or flip) |
-| | `combo_select` | Select an item from a combobox |
-| **Wait** | `wait_for` | Wait for a control to appear or disappear |
-
-### Tool Notes
-
-- **`get_value` vs `get_text`**: `get_value` reads from input fields / spinboxes that support ValuePattern. `get_text` reads the Name property of any control (labels, buttons, headers). Use `get_text` for static text, `get_value` for editable fields.
-
-- **`discover` vs `dump_tree`**: `discover` shows a summary (class, name, type) at shallow depth — good for quick exploration. `dump_tree` goes deeper and includes rect, patterns, and visibility info — use when you need the full picture.
-
-- **`ocr_scan`**: captures the window, runs the bundled PP-OCRv6 tiny detector/recognizer, and binds each OCR line to the smallest visible UIA control containing it. Each node gains `ref`, `uia_text`, `ocr_text`, `ocr_confidence`, `effective_text`, and `text_source`. Pass a node `ref` to `click`, `double_click`, `right_click`, or `hover` to operate that exact control even when its accessible Name is empty. Re-run `ocr_scan` after the UI structure changes.
-
-- **`toggle`**: Pass `enable=true` to force checked, `enable=false` to force unchecked. Omit `enable` to flip the current state.
-
-- **`find_control` vs `click`**: `find_control` searches and returns info without clicking. Use it to check if a control exists or inspect multiple matches before deciding which to interact with.
-
-- **`wait_for`**: Polls until a control appears or disappears. Useful for loading screens, async dialogs, or waiting for a spinner to go away. Default timeout is 10 seconds.
-
-- **`type_text`**: If you specify a `name` or `control_class`, it types into that control. If you omit both, it types into whatever is currently focused.
-
-## Usage Examples
-
-### With an AI Agent (natural language)
-
-After installing the MCP server, just ask your agent:
-
-- "List all open windows on my desktop"
-- "Click the Save button in Notepad"
-- "Type 'Hello World' into the search box in my app"
-- "Toggle the Dark Mode checkbox in Settings"
-- "Wait for the loading spinner to disappear"
-- "Read the text of the status label"
-- "OCR this window, find the button that says Save, and click it"
-
-### CLI (direct usage)
-
-```bash
-# List all windows
+```powershell
+# Discover applications and windows
+uv run python cli_gateway.py list-apps
 uv run python cli_gateway.py list-windows
 
-# Explore Notepad's UI
-uv run python cli_gateway.py --window "Notepad" describe
-uv run python cli_gateway.py --window "Notepad" dump-tree --depth 3
+# Launch and inspect
+uv run python cli_gateway.py launch-app --app notepad
+uv run python cli_gateway.py --window-id 0x1234 snapshot --query save
 
-# OCR and bind visible text to controls, then act by the returned ref
-uv run python cli_gateway.py --window "MyApp" ocr-scan --depth 5 --max-nodes 500
-uv run python cli_gateway.py --window "MyApp" click --ref "0.3.2.1"
-
-# Find controls without clicking
-uv run python cli_gateway.py --window "Notepad" find --name "Save"
-
-# Interact
-uv run python cli_gateway.py --window "Notepad" click --name "Save"
-uv run python cli_gateway.py --window "Notepad" type --text "Hello World"
-uv run python cli_gateway.py --window "Notepad" hotkey --keys "Ctrl+s"
-
-# Read text from a label
-uv run python cli_gateway.py --window "Notepad" get-text --name "Status"
-
-# Wait for a control
-uv run python cli_gateway.py --window "MyApp" wait-for --name "Loading" --timeout 15 --disappear
-
-# Focus a window
-uv run python cli_gateway.py --window "Notepad" focus
-
-# Launch Accessibility Insights for visual inspection
-uv run python cli_gateway.py inspect
+# Act and verify
+uv run python cli_gateway.py --window-id 0x1234 click --element-id e8
+uv run python cli_gateway.py --window-id 0x1234 get-value --element-id e12
 ```
 
-### Python Script (multi-step workflows)
+Run `uv run python cli_gateway.py --help` for the complete command list.
+
+## Python API
 
 ```python
 from winui_mcp.driver import AppDriver
 from winui_mcp import skills_library as sk
 
-driver = AppDriver(window_title="Notepad")
+driver = AppDriver(window_id="0x1234")
+snapshot = sk.snapshot(driver, query="Save", interactive_only=True)
+element = snapshot["data"]["elements"][0]
 
-# Discover controls
-tree = sk.discover_ui(driver, max_depth=3)
-
-# OCR and bind visible labels to UIA nodes
-ocr_result = sk.ocr_scan(driver, max_depth=5, max_nodes=500)
-# Inspect tree nodes for effective_text/ocr_text, then act by ref:
-# sk.click_ref(driver, "0.3.2.1")
-
-# Find without clicking
-result = sk.find_control(driver, name="Save")
-
-# Click and type
-sk.click_by_name(driver, "Edit")
-sk.type_in(driver, "Hello from Python!")
-sk.send_hotkey(driver, "Ctrl+s")
-
-# Wait for confirmation dialog
-sk.wait_for_control(driver, name="Save As", timeout=5)
+assert sk.activate_reference(
+    driver, "click", element_id=element["element_id"]
+)["success"]
 ```
+
+## Testing
+
+Unit tests are safe and do not control the desktop:
+
+```bash
+uv run --extra dev python -m pytest tests -q
+```
+
+Live protocol and application tests are opt-in:
+
+```powershell
+$env:WINUI_RUN_INTEGRATION="1"
+uv run --extra dev python -m pytest tests/integration/test_mcp_stdio.py -q
+
+$env:WINUI_RUN_APP_LAUNCH="1"
+uv run --extra dev python -m pytest tests/integration/test_app_launch_matrix.py -q
+```
+
+See [docs/TESTING.md](docs/TESTING.md) for the matrix, environment gates, local
+Conda workflow, and release checks.
 
 ## Architecture
 
-```
+```text
 winui_mcp/
-  mcp_server.py        MCP server — exposes all skills as MCP tools
-  cli_gateway.py       CLI interface — single-command automation
-  driver.py            Core UIA engine — window binding, refs, element resolution
-  skills_library.py    Skill primitives — click, type, OCR discovery, wait, find, etc.
-  capture.py           GDI window capture to OpenCV images
-  ocr.py               PP-OCRv6 ONNX detector/recognizer pipeline
-  ocr_pipeline.py      Spatial binding of OCR lines to UIA controls
-  config.py            Runtime paths and bundled model discovery
-  models/PP-OCRv6/     Bundled tiny detector, recognizer, and vocabulary
-pyproject.toml         Package metadata and dependencies
+  mcp_server.py       Structured MCP tool surface and server instructions
+  skills_library.py   Snapshot, reference actions, OCR, and workflow primitives
+  driver.py           Window binding, Win32 discovery, UIA traversal, refs
+  apps.py             Portable common-app catalog and launcher
+  capture.py          GDI window capture
+  ocr.py              PP-OCRv6 ONNX detector/recognizer
+  ocr_pipeline.py     Spatial binding of OCR lines to UIA controls
+  config.py           Bundled resource discovery
+  models/PP-OCRv6/    Local OCR models and vocabularies
 ```
+
+## Safety and limitations
+
+- UI Automation quality depends on the target application's accessibility
+  provider. OCR is available as a fallback, but it is inherently approximate.
+- Browsers and Electron apps may expose large or lazy trees. Use `query`,
+  `interactive_only`, and bounded `max_nodes`.
+- Coordinate-based operation is not exposed as the preferred workflow.
+- Destructive, financial, messaging, and security-sensitive actions require
+  explicit user intent.
+- Some elevated applications cannot be automated from a non-elevated process.
 
 ## License
 

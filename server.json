@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.whyb/winui-mcp-server",
+  "title": "WinUI MCP Server",
+  "description": "Agent-first Windows UI Automation through MCP with stable element ids, local OCR fallback, and portable common-app launchers.",
+  "version": "0.4.0",
+  "websiteUrl": "https://github.com/whyb/winui_mcp_server",
+  "repository": {
+    "url": "https://github.com/whyb/winui_mcp_server",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "winui-mcp-server",
+      "version": "0.4.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

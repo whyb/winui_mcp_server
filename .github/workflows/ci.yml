@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --python ${{ matrix.python-version }}
+
+      - name: Run static checks
+        run: uv run --extra dev ruff check winui_mcp tests
+
+      - name: Run unit tests
+        run: uv run --extra dev python -m pytest tests -q
+
+      - name: Build package
+        if: matrix.python-version == '3.12'
+        run: uv build
+
+      - name: Verify bundled OCR models
+        if: matrix.python-version == '3.12'
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem dist -Filter *.whl | Select-Object -First 1
+          if (-not $wheel) { throw "Wheel was not built" }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($wheel.FullName)
+          try {
+            $entries = $archive.Entries | ForEach-Object FullName
+            if (-not ($entries -match "models/PP-OCRv6/det/.*\.onnx$")) {
+              throw "Detector model is missing from the wheel"
+            }
+            if (-not ($entries -match "models/PP-OCRv6/rec/.*\.onnx$")) {
+              throw "Recognizer model is missing from the wheel"
+            }
+          } finally {
+            $archive.Dispose()
+          }

@@ -63,8 +63,6 @@ def _ocr_model_candidates():
     if configured:
         candidates.append(configured)
     candidates.append(_OCR_MODEL_DIR)
-    # Source-checkout fallback for alternate packaging layouts.
-    candidates.append(os.path.join(os.path.dirname(PROJECT_DIR), "models", "PP-OCRv6"))
     return candidates
 
 

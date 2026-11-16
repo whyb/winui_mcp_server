@@ -1,9 +1,9 @@
-"""PP-OCRv5/v6 ONNX inference pipeline.
+"""PP-OCRv6 ONNX inference pipeline.
 
-The implementation follows the reference C++ PP-OCRv5 detector/recognizer:
-image normalization, DB-style contour extraction, rotated crop, and CTC
-decoding.  ONNX Runtime and OpenCV are imported lazily so normal UIA-only
-workflows do not pay OCR startup cost.
+Implements image normalization, DB-style contour extraction, rotated crops,
+and CTC decoding for the bundled PP-OCRv6 tiny detector and recognizer.
+ONNX Runtime and OpenCV are imported lazily so normal UIA-only workflows do
+not pay OCR startup cost.
 """
 import os
 from dataclasses import dataclass

@@ -1,92 +1,80 @@
 # WinUI MCP Server
 
 <p align="center">
-    <a href="https://pypi.org/project/winui-mcp-server">
-        <img src="https://badgen.net/pypi/v/winui-mcp-server?color=yellow" />
-    </a>
-    <a href="https://pypi.org/project/winui-mcp-server">
-    <a href="https://pypistats.org/packages/winui-mcp-server">
-        <img src="https://static.pepy.tech/badge/winui-mcp-server" />
-    </a>
+  <a href="https://pypi.org/project/winui-mcp-server">
+    <img src="https://badgen.net/pypi/v/winui-mcp-server?color=yellow" alt="PyPI version">
+  </a>
+  <a href="https://pypistats.org/packages/winui-mcp-server">
+    <img src="https://static.pepy.tech/badge/winui-mcp-server" alt="PyPI downloads">
+  </a>
 </p>
 
 > [English](README.md)
 
-一个 MCP（Model Context Protocol）服务器，让 AI 智能体能够通过 UI Automation 控制 **任意 Windows 桌面应用程序**。无需屏幕坐标 — 通过控件的类名层级、名称，或绑定到控件上的 OCR 文本来定位。
+WinUI MCP Server 通过 Model Context Protocol 为 AI Agent 提供 Windows 桌面应用
+的语义化控制能力。适用于 **Codex、Claude Code、OpenCode、Cline、GitHub Copilot、
+Kimi Code、DeepSeek Harness** 以及所有支持 MCP stdio 工具的客户端。
 
-## 功能介绍
+服务器优先使用 UI Automation；当控件缺少可访问文本时，可使用仓库内置的
+PP-OCRv6 本地 OCR 模型作为后备。支持 Win32、UWP、Chromium 浏览器以及 VS Code
+等 Electron 应用。
 
-本服务器提供 26 个工具，让您的 AI 智能体可以：
+## 面向 Agent 的设计
 
-- **发现** — 探索任意窗口的 UIA 树，找到目标控件
-- **OCR 绑定** — 当控件缺失可访问名称时，识别可见文字并绑定到正确的 UIA 控件
-- **点击 / 双击 / 右键 / 悬停** — 按名称或类名与控件交互
-- **输入 / 按键 / 快捷键** — 向任意控件发送键盘输入
-- **滚动** — 在控件或窗口上上下滚动
-- **读取 / 设置值** — 获取或设置文本框、数值框、复选框、下拉框的值
-- **等待** — 等待控件出现或消失（异步 UI 场景）
-- **窗口管理** — 列出窗口、获取窗口状态、聚焦窗口、恢复最小化的窗口
+0.4 版本重点解决 AI Agent 容易走弯路的问题：
 
-每个工具返回结构化 JSON：`{"success": bool, "message": str, "data": dict}`。
+- `list_windows` 和 `launch_app` 返回稳定的 `window_id`，避免同名窗口或同进程
+  多窗口误操作。
+- `snapshot` 返回稳定的 `element_id`，常规操作不再依赖容易失效的树路径。
+- 紧凑快照只返回代理真正需要的控件名称、文本、值、可见性、Pattern 和交互能力。
+- 内置常见应用目录和路径无关的启动发现机制，覆盖记事本、计算器、画图、设置、
+  文件资源管理器、VS Code、Edge、Chrome 和媒体播放器。
+- 通过 `PATH`、Windows `App Paths` 注册表和系统 URI 协议动态定位应用，仓库中
+  不保存个人安装路径。
+- 所有 MCP 工具返回结构化结果：`success`、`message`、`data`、可选 `verified`，
+  失败时返回机器可读的 `error`。
+- `run_actions` 可在一次 MCP 调用中执行一组低风险动作，减少往返次数。
+- 每个集成测试都会启动全新的 MCP stdio 进程，等价于真实客户端重新加载服务器。
 
 ## 环境要求
 
-- **Windows 10/11**
-- **Python 3.10+**
-- **[uv](https://docs.astral.sh/uv/)** — 快速 Python 包管理器（`pip install uv`）
-- **内置 PP-OCRv6 tiny 模型** — OCR 完全通过 ONNX Runtime 和 OpenCV 在本地运行，无需下载模型或调用云端服务
+- Windows 10 或 Windows 11
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/)
+- 仅安装时需要网络；自动化和 OCR 均在本机运行
 
-## 安装步骤
+## 安装
 
-### 安装 uv（如果尚未安装）
-
-```bash
-pip install uv
-```
-
-### 安装包
-
-```bash
-git clone https://github.com/whyb/winui_mcp_server.git
-cd winui_mcp_server
-
-uv sync
-```
-
-或直接从 PyPI 安装（发布后）：
+安装为独立 MCP Server 工具：
 
 ```bash
 uv tool install winui-mcp-server
 ```
 
-## 安装为 MCP 服务器
+或直接临时运行：
 
-服务器通过 **stdio** 传输协议运行。以下是各大主流智能体客户端的配置说明。
-
----
-
-### Claude Code
-
-添加到项目级 `.claude/settings.json` 或全局 `~/.claude/settings.json`：
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
+```bash
+uvx winui-mcp-server
 ```
 
-重启 Claude Code 后，`winui` 工具将出现在工具列表中。
+从源码开发：
 
----
+```bash
+git clone https://github.com/whyb/winui_mcp_server.git
+cd winui_mcp_server
+uv sync --extra dev
+```
 
-### Codex (OpenAI)
+## MCP 客户端配置
 
-在 Codex 项目中创建或编辑 `.codex/config.toml`：
+服务器使用标准 MCP stdio：
+
+```text
+command: uvx
+args:    ["winui-mcp-server"]
+```
+
+### Codex
 
 ```toml
 [mcp_servers.winui]
@@ -94,37 +82,7 @@ command = "uvx"
 args = ["winui-mcp-server"]
 ```
 
-重启 Codex 以加载新服务器。
-
----
-
-### Cline（VS Code 扩展）
-
-1. 打开已安装 Cline 扩展的 VS Code。
-2. 打开 Cline 的 MCP 设置（Cline 面板中的齿轮图标）。
-3. 添加新的 MCP 服务器，配置如下：
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"],
-      "disabled": false
-    }
-  }
-}
-```
-
-也可以直接编辑 Cline MCP 配置文件：
-- **Windows**: `%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
-- **macOS**: `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
-
----
-
-### OpenCode
-
-编辑 `~/.opencode/config.json`：
+### Claude Code
 
 ```json
 {
@@ -137,35 +95,29 @@ args = ["winui-mcp-server"]
 }
 ```
 
----
+### OpenCode V2
 
-### Trae（字节跳动）
-
-1. 打开 Trae IDE。
-2. 进入 **设置 > MCP Servers**。
-3. 添加新服务器：
-
-```json
+```jsonc
 {
-  "winui": {
-    "command": "uvx",
-    "args": ["winui-mcp-server"]
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "winui": {
+        "type": "local",
+        "command": ["uvx", "winui-mcp-server"]
+      }
+    }
   }
 }
 ```
 
-也可以直接编辑 Trae 的 MCP 配置文件（位置因操作系统而异，通常位于 Trae 用户数据目录下）。
-
----
-
-### Antigravity
-
-编辑 Antigravity MCP 配置文件：
+### VS Code / GitHub Copilot
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "winui": {
+      "type": "stdio",
       "command": "uvx",
       "args": ["winui-mcp-server"]
     }
@@ -173,247 +125,148 @@ args = ["winui-mcp-server"]
 }
 ```
 
----
+Cline、Kimi Code、DeepSeek Harness 以及本地 Conda 开发配置见
+[docs/CLIENTS.md](docs/CLIENTS.md)。
 
-### GitHub Copilot（VS Code）
+## 推荐 Agent 工作流
 
-GitHub Copilot 在 Agent 模式下支持 MCP。添加到 VS Code 的 `settings.json`：
+1. 应用未启动时调用 `launch_app`；已启动时调用 `list_windows`。
+2. 保存返回的 `window_id`。
+3. 调用 `snapshot`；UI 较大时使用 `query` 缩小范围。
+4. 使用最新快照中的 `element_id` 执行点击、输入、设置值等操作。
+5. 使用新的 `snapshot`、`get_value`、`get_text` 或 `wait_for` 验证结果。
+6. UI 导航、弹窗或页面变化后必须重新获取快照。
+
+服务器会通过 MCP 初始化说明自动传递该工作流，同时提供 `winui://guide` 资源、
+`automate_windows_task` Prompt 和可移植的
+[WinUI automation skill](skills/winui-automation/SKILL.md)。
+
+完整说明见 [Agent 自动化指南](docs/AGENT_GUIDE.md)。
+
+## 工具列表
+
+| 分类 | 工具 |
+|---|---|
+| 应用 | `list_apps`、`launch_app` |
+| 窗口 | `list_windows`、`get_window_state`、`focus_window`、`window_action`、`reset_driver` |
+| 观察 | `snapshot`、`ocr_scan`、`find_control`、`wait_for` |
+| 兼容发现 | `discover`、`describe`、`dump_tree`、`get_control_rect` |
+| 鼠标 | `click`、`double_click`、`right_click`、`hover` |
+| 滚动 | `scroll_up`、`scroll_down` |
+| 键盘 | `send_key`、`send_hotkey`、`long_press_key`、`type_text` |
+| 值操作 | `get_value`、`get_text`、`set_value`、`toggle`、`combo_select` |
+| 工作流 | `run_actions` |
+
+## 稳定元素引用
+
+快照元素示例：
 
 ```json
 {
-  "github.copilot.chat.mcp.servers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
+  "element_id": "e42",
+  "role": "Button",
+  "name": "保存",
+  "text": "保存",
+  "auto_id": "saveButton",
+  "interactive": true,
+  "enabled": true,
+  "patterns": ["Invoke"]
+}
+```
+
+将 `e42` 传给 `click` 或 `run_actions`。UI 改变后旧 ID 会失效，服务器会要求重新
+获取快照，而不是静默点击错误的控件。
+
+## 返回结构
+
+```json
+{
+  "success": true,
+  "message": "Value set and verified",
+  "data": {},
+  "verified": true
+}
+```
+
+失败示例：
+
+```json
+{
+  "success": false,
+  "message": "Element id is stale",
+  "data": {},
+  "error": {
+    "code": "operation_failed",
+    "retryable": false,
+    "hint": "Call snapshot again before acting."
   }
 }
 ```
 
-或在 VS Code 设置界面中搜索 `github.copilot.chat.mcp.servers` 并添加服务器条目。
+## OCR 后备
 
-> **注意：** GitHub Copilot 的 MCP 支持需要 VS Code 1.99+ 且在 Agent 模式下使用 Copilot Chat。
-
----
-
-### Qoder
-
-编辑 Qoder MCP 设置：
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
+```text
+snapshot(window_id="0x1234", include_ocr=true, query="保存")
 ```
 
----
+内置 PP-OCRv6 tiny 检测与识别模型通过 ONNX Runtime 在本机运行，并按空间位置绑定
+到最小包含该文本的 UIA 控件。不会向外部 OCR 服务发送截图或文字。
 
-### CodeBuddy
+## CLI
 
-编辑 CodeBuddy MCP 配置：
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
+```powershell
+uv run python cli_gateway.py list-apps
+uv run python cli_gateway.py list-windows
+uv run python cli_gateway.py launch-app --app notepad
+uv run python cli_gateway.py --window-id 0x1234 snapshot --query save
 ```
 
----
+完整命令使用 `uv run python cli_gateway.py --help` 查看。
 
-### Cursor
+## 测试
 
-编辑项目级 `.cursor/mcp.json` 或全局 `~/.cursor/mcp.json`：
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
-```
-
----
-
-### Windsurf
-
-编辑 `~/.codeium/windsurf/mcp_config.json`：
-
-```json
-{
-  "mcpServers": {
-    "winui": {
-      "command": "uvx",
-      "args": ["winui-mcp-server"]
-    }
-  }
-}
-```
-
----
-
-### 任意 MCP 客户端（通用）
-
-本服务器使用 **stdio** 传输协议，遵循标准 MCP 协议规范。任何支持 MCP 的客户端均可使用：
-
-| 属性 | 值 |
-|------|-----|
-| 传输协议 | `stdio` |
-| 命令 | `uvx` |
-| 参数 | `["winui-mcp-server"]` |
-| 服务器名称 | `winui` |
-
-## 可用工具（26 个）
-
-| 类别 | 工具 | 说明 |
-|------|------|------|
-| **窗口** | `list_windows` | 列出桌面上所有顶层窗口 |
-| | `get_window_state` | 获取窗口位置、大小、最小化状态 |
-| | `focus_window` | 将窗口置于前台并聚焦 |
-| | `reset_driver` | 清除缓存的窗口绑定 |
-| **发现** | `discover` | 探索有节点上限的紧凑 UIA 树（默认深度 2） |
-| | `describe` | 列出直接子控件的类名、名称、支持的模式 |
-| | `dump_tree` | 有节点上限的详细 UIA 树转储（默认深度 4） |
-| | `ocr_scan` | 识别窗口文字并与 UIA 树节点绑定 |
-| | `get_control_rect` | 获取控件的边界矩形 |
-| | `find_control` | 按名称/类名分页查找控件 |
-| **鼠标** | `click` | 按 ref、名称或类名点击控件 |
-| | `double_click` | 按 ref、名称或类名双击控件 |
-| | `right_click` | 按 ref、名称或类名右键点击控件 |
-| | `hover` | 按 ref、名称或类名将鼠标移动到控件上 |
-| **滚动** | `scroll_up` | 在控件或窗口上向上滚动 |
-| | `scroll_down` | 在控件或窗口上向下滚动 |
-| **键盘** | `send_key` | 发送单个按键 |
-| | `send_hotkey` | 发送组合键（如 Ctrl+c） |
-| | `long_press_key` | 长按某个键 |
-| | `type_text` | 向控件输入文本 |
-| **值操作** | `get_value` | 读取编辑框/数值框的当前值（ValuePattern） |
-| | `get_text` | 读取控件的 Name 文本（标签、按钮等） |
-| | `set_value` | 设置编辑框/数值框的值 |
-| | `toggle` | 切换复选框/开关（强制开/关或翻转） |
-| | `combo_select` | 从下拉框中选择一项 |
-| **等待** | `wait_for` | 等待控件出现或消失 |
-
-### 工具使用说明
-
-- **`get_value` 和 `get_text` 的区别**：`get_value` 读取支持 ValuePattern 的输入框/数值框的内容。`get_text` 读取任意控件的 Name 属性（标签、按钮、标题等）。静态文本用 `get_text`，可编辑字段用 `get_value`。
-
-- **`discover` 和 `dump_tree` 的区别**：`discover` 显示摘要信息（类名、名称、类型），深度较浅，适合快速浏览。`dump_tree` 更深更详细，包含边界矩形、支持的模式、可见性等信息，适合需要完整了解界面结构时使用。
-
-- **`ocr_scan`**：截取窗口，使用内置 PP-OCRv6 tiny 检测与识别模型执行 OCR，并把每条文字绑定到包含它的最小可见 UIA 控件。每个节点会得到 `ref`、`uia_text`、`ocr_text`、`ocr_confidence`、`effective_text` 和 `text_source`。把节点 `ref` 传给 `click`、`double_click`、`right_click` 或 `hover`，即使控件 Name 为空也能操作准确控件。界面结构变化后请重新执行 `ocr_scan`。
-
-- **`toggle`**：传 `enable=true` 强制设为勾选，`enable=false` 强制取消勾选。不传 `enable` 则翻转当前状态。
-
-- **`find_control` 和 `click` 的区别**：`find_control` 只搜索并返回信息，不执行点击。用于检查控件是否存在，或在决定操作前查看所有匹配项。
-
-- **`wait_for`**：轮询直到控件出现或消失。适用于加载界面、异步弹窗、等待加载动画结束等场景。默认超时 10 秒。
-
-- **`type_text`**：如果指定了 `name` 或 `control_class`，会输入到指定控件。如果不指定，则输入到当前聚焦的元素。
-
-## 使用示例
-
-### 通过 AI 智能体（自然语言）
-
-安装 MCP 服务器后，直接用自然语言告诉智能体：
-
-- "列出我桌面上所有打开的窗口"
-- "点击记事本中的保存按钮"
-- "在我的应用搜索框中输入'你好世界'"
-- "切换设置中的深色模式复选框"
-- "等待加载动画消失"
-- "读取状态标签的文本"
-- "对这个窗口做 OCR，找到写着保存的按钮并点击"
-
-### 命令行（直接使用）
+安全单元测试不会操作桌面：
 
 ```bash
-# 列出所有窗口
-uv run python cli_gateway.py list-windows
-
-# 探索记事本的 UI 结构
-uv run python cli_gateway.py --window "记事本" describe
-uv run python cli_gateway.py --window "记事本" dump-tree --depth 3
-
-# OCR 并把可见文字绑定到控件，再用返回的 ref 操作
-uv run python cli_gateway.py --window "MyApp" ocr-scan --depth 5 --max-nodes 500
-uv run python cli_gateway.py --window "MyApp" click --ref "0.3.2.1"
-
-# 查找控件但不点击
-uv run python cli_gateway.py --window "记事本" find --name "保存"
-
-# 交互操作
-uv run python cli_gateway.py --window "记事本" click --name "保存"
-uv run python cli_gateway.py --window "记事本" type --text "你好世界"
-uv run python cli_gateway.py --window "记事本" hotkey --keys "Ctrl+s"
-
-# 读取标签文本
-uv run python cli_gateway.py --window "记事本" get-text --name "状态"
-
-# 等待控件消失
-uv run python cli_gateway.py --window "MyApp" wait-for --name "加载中" --timeout 15 --disappear
-
-# 聚焦窗口
-uv run python cli_gateway.py --window "记事本" focus
-
-# 启动 Accessibility Insights 进行可视化检查
-uv run python cli_gateway.py inspect
+uv run --extra dev python -m pytest tests -q
 ```
 
-### Python 脚本（多步骤工作流）
+真实 MCP 协议测试和常见应用矩阵默认关闭，需要显式开启：
 
-```python
-from winui_mcp.driver import AppDriver
-from winui_mcp import skills_library as sk
+```powershell
+$env:WINUI_RUN_INTEGRATION="1"
+uv run --extra dev python -m pytest tests/integration/test_mcp_stdio.py -q
 
-driver = AppDriver(window_title="记事本")
-
-# 发现控件
-tree = sk.discover_ui(driver, max_depth=3)
-
-# OCR 并把可见文字绑定到 UIA 节点
-ocr_result = sk.ocr_scan(driver, max_depth=5, max_nodes=500)
-# 检查树节点中的 effective_text/ocr_text，再用 ref 操作：
-# sk.click_ref(driver, "0.3.2.1")
-
-# 查找但不点击
-result = sk.find_control(driver, name="保存")
-
-# 点击并输入
-sk.click_by_name(driver, "Edit")
-sk.type_in(driver, "来自 Python 的问候！")
-sk.send_hotkey(driver, "Ctrl+s")
-
-# 等待确认弹窗
-sk.wait_for_control(driver, name="另存为", timeout=5)
+$env:WINUI_RUN_APP_LAUNCH="1"
+uv run --extra dev python -m pytest tests/integration/test_app_launch_matrix.py -q
 ```
 
-## 项目架构
+测试矩阵、环境变量、本地 Conda 重载流程和发布检查见
+[docs/TESTING.md](docs/TESTING.md)。
 
-```
+## 架构
+
+```text
 winui_mcp/
-  mcp_server.py        MCP 服务器 — 将所有技能暴露为 MCP 工具
-  cli_gateway.py       命令行接口 — 单命令自动化
-  driver.py            核心 UIA 引擎 — 窗口绑定、ref 解析、元素定位
-  skills_library.py    技能原语 — 点击、输入、OCR 发现、等待、查找等
-  capture.py           GDI 窗口截图并转换为 OpenCV 图像
-  ocr.py               PP-OCRv6 ONNX 检测与识别流水线
-  ocr_pipeline.py      OCR 文本与 UIA 控件的空间绑定
-  config.py            运行时路径与内置模型发现
-  models/PP-OCRv6/     内置 tiny 检测模型、识别模型和字典
-pyproject.toml         包元数据与依赖
+  mcp_server.py       结构化 MCP 工具面和服务器说明
+  skills_library.py   快照、引用操作、OCR 与工作流原语
+  driver.py           窗口绑定、Win32 发现、UIA 遍历与引用解析
+  apps.py             路径无关的常见应用目录与启动器
+  capture.py          GDI 窗口截图
+  ocr.py              PP-OCRv6 ONNX 检测与识别
+  ocr_pipeline.py     OCR 文本与 UIA 控件的空间绑定
+  config.py           内置资源发现
+  models/PP-OCRv6/    本地 OCR 模型与词表
 ```
+
+## 安全与限制
+
+- UI Automation 能力取决于目标应用的可访问性实现，OCR 只应作为后备方案。
+- 浏览器和 Electron 应用可能产生很大的惰性树，应使用 `query`、
+  `interactive_only` 和受限的 `max_nodes`。
+- 不以坐标点击作为推荐工作流。
+- 删除、覆盖、提交、发送、购买和修改安全设置等操作必须获得用户明确意图。
+- 非管理员进程可能无法自动化提权后的应用。
 
 ## 许可证
 

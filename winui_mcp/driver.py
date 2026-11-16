@@ -5,6 +5,7 @@ Generic engine that works with any Windows application.
 import time
 import ctypes
 import ctypes.wintypes
+from dataclasses import dataclass
 import uiautomation as auto
 
 
@@ -48,6 +49,29 @@ _user32.keybd_event.argtypes = [
     ctypes.wintypes.DWORD, ctypes.c_size_t,
 ]
 _user32.keybd_event.restype = None
+_user32.PostMessageW.argtypes = [
+    ctypes.wintypes.HWND, ctypes.wintypes.UINT,
+    ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM,
+]
+_user32.PostMessageW.restype = ctypes.wintypes.BOOL
+_user32.IsWindowVisible.argtypes = [ctypes.wintypes.HWND]
+_user32.IsWindowVisible.restype = ctypes.wintypes.BOOL
+_user32.GetWindowTextLengthW.argtypes = [ctypes.wintypes.HWND]
+_user32.GetWindowTextLengthW.restype = ctypes.c_int
+_user32.GetWindowTextW.argtypes = [
+    ctypes.wintypes.HWND, ctypes.wintypes.LPWSTR, ctypes.c_int
+]
+_user32.GetWindowTextW.restype = ctypes.c_int
+_user32.GetClassNameW.argtypes = [
+    ctypes.wintypes.HWND, ctypes.wintypes.LPWSTR, ctypes.c_int
+]
+_user32.GetClassNameW.restype = ctypes.c_int
+_user32.GetWindowRect.argtypes = [
+    ctypes.wintypes.HWND, ctypes.POINTER(ctypes.wintypes.RECT)
+]
+_user32.GetWindowRect.restype = ctypes.wintypes.BOOL
+_user32.EnumWindows.argtypes = [ctypes.c_void_p, ctypes.wintypes.LPARAM]
+_user32.EnumWindows.restype = ctypes.wintypes.BOOL
 
 
 def _get_class_name(control: auto.Control) -> str:
@@ -93,6 +117,26 @@ def _get_native_handle(control: auto.Control) -> int:
         return int(control.NativeWindowHandle or 0)
     except Exception:
         return 0
+
+
+def parse_window_id(window_id) -> int:
+    """Parse a decimal or hexadecimal native window handle."""
+    if window_id is None or str(window_id).strip() == "":
+        raise ValueError("window_id cannot be empty")
+    try:
+        value = int(str(window_id).strip(), 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "window_id must be a decimal or 0x-prefixed native window handle"
+        ) from exc
+    if value <= 0:
+        raise ValueError("window_id must be a positive native window handle")
+    return value
+
+
+def format_window_id(handle: int) -> str:
+    """Return a stable, client-friendly hexadecimal window id."""
+    return f"0x{int(handle):X}" if handle else ""
 
 
 def _get_control_pid(control: auto.Control) -> int:
@@ -146,6 +190,82 @@ def _find_window_by_title(title: str, class_name: str = None,
     )
 
 
+def _window_text(hwnd: int) -> str:
+    length = max(0, int(_user32.GetWindowTextLengthW(hwnd)))
+    buffer = ctypes.create_unicode_buffer(length + 1)
+    _user32.GetWindowTextW(hwnd, buffer, length + 1)
+    return buffer.value
+
+
+def _window_class(hwnd: int) -> str:
+    buffer = ctypes.create_unicode_buffer(256)
+    _user32.GetClassNameW(hwnd, buffer, 256)
+    return buffer.value
+
+
+def enumerate_top_level_windows(visible_only: bool = True) -> list[dict]:
+    """Enumerate native top-level windows, including UWP frame windows UIA misses."""
+    results = []
+    callback_type = ctypes.WINFUNCTYPE(
+        ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM
+    )
+
+    @callback_type
+    def callback(hwnd, _lparam):
+        try:
+            visible = bool(_user32.IsWindowVisible(hwnd))
+            if visible_only and not visible:
+                return True
+            title = _window_text(hwnd)
+            class_name = _window_class(hwnd)
+            if not title and not class_name:
+                return True
+            rect = ctypes.wintypes.RECT()
+            _user32.GetWindowRect(hwnd, ctypes.byref(rect))
+            pid = _get_pid_from_hwnd(hwnd)
+            results.append({
+                "handle": int(hwnd),
+                "title": title,
+                "class": class_name,
+                "visible": visible,
+                "pid": pid,
+                "process_name": _get_process_name(pid) if pid else "",
+                "left": rect.left,
+                "top": rect.top,
+                "right": rect.right,
+                "bottom": rect.bottom,
+                "width": rect.right - rect.left,
+                "height": rect.bottom - rect.top,
+            })
+        except Exception:
+            pass
+        return True
+
+    _user32.EnumWindows(callback, 0)
+    return results
+
+
+def _find_window_by_handle(window_id, timeout: float = 5) -> auto.WindowControl:
+    """Bind directly to a native window handle from list_windows/launch_app."""
+    handle = parse_window_id(window_id)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            control = auto.ControlFromHandle(handle)
+        except Exception:
+            control = None
+        if control is not None:
+            try:
+                if _get_native_handle(control) == handle:
+                    return control
+            except Exception:
+                pass
+        time.sleep(0.2)
+    raise RuntimeError(
+        f"Window handle {format_window_id(handle)} no longer exists or is not a top-level window"
+    )
+
+
 def _find_window_by_process(process_name: str, timeout: float = 5) -> auto.WindowControl:
     """Find the first visible top-level window belonging to a process name."""
     import time as _time
@@ -155,15 +275,13 @@ def _find_window_by_process(process_name: str, timeout: float = 5) -> auto.Windo
         proc_lower += ".exe"
 
     while _time.time() < deadline:
-        for ctrl in auto.GetRootControl().GetChildren():
-            if ctrl.ControlTypeName != "WindowControl":
-                continue
+        for record in enumerate_top_level_windows(visible_only=True):
             try:
-                hwnd = ctrl.NativeWindowHandle
-                pid = _get_pid_from_hwnd(hwnd)
-                pname = _get_process_name(pid)
-                if pname and pname.lower() == proc_lower:
-                    return ctrl
+                pname = record.get("process_name", "")
+                if pname and pname.lower() == proc_lower and record.get("title"):
+                    control = auto.ControlFromHandle(record["handle"])
+                    if control is not None:
+                        return control
             except Exception:
                 continue
         _time.sleep(0.5)
@@ -375,24 +493,50 @@ def _control_signature(control: auto.Control) -> tuple:
     return (runtime_id, handle, _get_class_name(control), _get_name(control), rect)
 
 
+@dataclass
+class ElementReference:
+    """A stable element handle backed by UIA identity and a tree path fallback."""
+
+    element_id: str
+    control: auto.Control
+    tree_ref: str
+    identity: tuple
+    class_name: str
+    name: str
+    auto_id: str
+
+
 class AppDriver:
     """High-level driver wrapping window binding and element resolution.
-    Works with any Windows application — pass window_title, process_name, or both."""
+
+    Bind by native window id for deterministic multi-window operation, or use a
+    process/title locator for interactive discovery.
+    """
 
     def __init__(self, window_title: str = None, window_class: str = None,
-                 process_name: str = None, timeout: int = 5):
+                 process_name: str = None, timeout: int = 5,
+                 window_id: str = None):
         self._window_title = window_title
         self._window_class = window_class
         self._process_name = process_name
+        self._window_id = window_id
         self._window = None
         self._pid = 0
         self._hwnd = 0
         self._search_errors = []
         self._timeout = timeout
+        self._element_refs = {}
+        self._element_identity_ids = {}
+        self._element_sequence = 0
+        self._snapshot_generation = 0
 
     def find_main_window(self) -> auto.WindowControl:
         """Find and return the main application window.
-        Priority: process_name > window_title (exact then fuzzy)."""
+
+        Priority: native window_id > process_name > window_title.
+        """
+        if self._window_id:
+            return _find_window_by_handle(self._window_id, timeout=self._timeout)
         if self._process_name:
             return _find_window_by_process(self._process_name, timeout=self._timeout)
         if self._window_title:
@@ -400,7 +544,9 @@ class AppDriver:
                 self._window_title, self._window_class,
                 timeout=self._timeout, fuzzy=True
             )
-        raise RuntimeError("No window_title or process_name specified.")
+        raise RuntimeError(
+            "No window_id, process_name, or window_title specified."
+        )
 
     def _remember_window(self, window: auto.WindowControl) -> None:
         """Record the concrete window identity used by this driver."""
@@ -431,6 +577,100 @@ class AppDriver:
     def window_identity(self) -> tuple:
         """Return the stable identity for the currently bound window."""
         return (self._pid, self._hwnd)
+
+    @property
+    def window_id(self) -> str:
+        """Return the bound native window handle as a hexadecimal id."""
+        _ = self.window
+        return format_window_id(self._hwnd)
+
+    @property
+    def process_name(self) -> str:
+        """Return the executable name for the bound window."""
+        _ = self.window
+        return _get_process_name(self._pid) if self._pid else ""
+
+    def reset_element_refs(self) -> int:
+        """Start a new element-handle generation and invalidate old handles."""
+        self._element_refs.clear()
+        self._element_identity_ids.clear()
+        self._element_sequence = 0
+        self._snapshot_generation += 1
+        return self._snapshot_generation
+
+    @staticmethod
+    def _semantic_element_match(control: auto.Control,
+                                stored: ElementReference) -> bool:
+        try:
+            if _control_identity(control) == stored.identity:
+                return True
+        except Exception:
+            pass
+        try:
+            if stored.auto_id and (control.AutomationId or "") == stored.auto_id:
+                return True
+        except Exception:
+            pass
+        return (
+            _get_class_name(control) == stored.class_name
+            and _get_name(control) == stored.name
+        )
+
+    def register_element(self, control: auto.Control, tree_ref: str = None) -> str:
+        """Register a control for the latest snapshot and return its element id."""
+        identity = _control_identity(control)
+        existing = self._element_identity_ids.get(identity)
+        if existing:
+            return existing
+        self._element_sequence += 1
+        element_id = f"e{self._element_sequence}"
+        try:
+            auto_id = control.AutomationId or ""
+        except Exception:
+            auto_id = ""
+        reference = ElementReference(
+            element_id=element_id,
+            control=control,
+            tree_ref=str(tree_ref or ""),
+            identity=identity,
+            class_name=_get_class_name(control),
+            name=_get_name(control),
+            auto_id=auto_id,
+        )
+        self._element_refs[element_id] = reference
+        self._element_identity_ids[identity] = element_id
+        return element_id
+
+    def resolve_element(self, element_id: str, timeout: float = None) -> auto.Control:
+        """Resolve an element id from the latest snapshot, or raise a stale error."""
+        normalized = str(element_id or "").strip().casefold()
+        reference = self._element_refs.get(normalized)
+        if reference is None:
+            raise LookupError(
+                f"Unknown element id {element_id!r}. Call snapshot and use an id "
+                "from the latest result."
+            )
+        deadline = time.time() + (
+            timeout if timeout is not None else self._timeout
+        )
+        while time.time() < deadline:
+            try:
+                if reference.control.Exists(maxSearchSeconds=0.1) and                         self._semantic_element_match(reference.control, reference):
+                    return reference.control
+            except Exception:
+                pass
+            if reference.tree_ref:
+                try:
+                    control = self.resolve_ref(reference.tree_ref)
+                    if self._semantic_element_match(control, reference):
+                        return control
+                except Exception:
+                    pass
+            time.sleep(0.1)
+        raise LookupError(
+            f"Element id {element_id!r} is stale after the UI changed. "
+            "Call snapshot again before acting."
+        )
 
     def get_search_roots(self) -> list:
         """Return the main window and all same-process top-level surfaces."""
@@ -726,6 +966,28 @@ class AppDriver:
         ctrl = self.resolve(locator, timeout)
         return _read_toggle_state(ctrl)
 
+    def close_window(self) -> None:
+        """Ask the bound window to close using UIA, then WM_CLOSE as fallback."""
+        win = self.window
+        last_error = None
+        try:
+            win.GetWindowPattern().Close()
+            time.sleep(0.2)
+            return
+        except Exception as exc:
+            last_error = exc
+        try:
+            win.Close()
+            time.sleep(0.2)
+            return
+        except Exception as exc:
+            last_error = exc
+        hwnd = _get_native_handle(win)
+        if hwnd and _user32.PostMessageW(hwnd, 0x0010, 0, 0):
+            time.sleep(0.2)
+            return
+        raise RuntimeError(f"Could not close the bound window: {last_error}")
+
     def scroll_to(self, sidebar_path: tuple, section_class: str) -> None:
         """Scroll a sidebar/scroll area to make a section visible.
         sidebar_path: locator tuple to the content QWidget (e.g. ("MyWidget", "CScrollArea", 0, "QWidget"))
@@ -756,6 +1018,10 @@ class AppDriver:
         except Exception:
             info["control_type"] = ""
 
+        try:
+            info["enabled"] = bool(control.IsEnabled)
+        except Exception:
+            info["enabled"] = None
         if not detailed:
             try:
                 info["visible"] = not control.IsOffscreen
@@ -777,6 +1043,10 @@ class AppDriver:
         except Exception:
             info["rect"] = None
             info["visible"] = False
+        try:
+            info["offscreen"] = bool(control.IsOffscreen)
+        except Exception:
+            info["offscreen"] = None
         patterns = []
         for pname in ("Value", "Toggle", "Invoke", "ExpandCollapse",
                        "ScrollItem", "Selection", "RangeValue"):
@@ -786,6 +1056,16 @@ class AppDriver:
             except Exception:
                 pass
         info["patterns"] = patterns
+        interactive_types = {
+            "ButtonControl", "CheckBoxControl", "ComboBoxControl",
+            "EditControl", "HyperlinkControl", "ListItemControl",
+            "MenuItemControl", "RadioButtonControl", "SliderControl",
+            "SpinnerControl", "SplitButtonControl", "TabItemControl",
+            "TreeItemControl", "DataItemControl",
+        }
+        info["interactive"] = (
+            bool(patterns) or info.get("control_type") in interactive_types
+        )
         return info
 
     def describe_children(self, control: auto.Control = None, depth: int = 1) -> list:
@@ -803,7 +1083,8 @@ class AppDriver:
         return result
 
     def dump_tree(self, control: auto.Control = None, max_depth: int = 3,
-                  detailed: bool = True, max_nodes: int = 200) -> dict:
+                  detailed: bool = True, max_nodes: int = 200,
+                  element_ids: bool = False) -> dict:
         """Recursively dump a bounded UIA tree structure."""
         if control is None:
             root = self.window
@@ -817,18 +1098,23 @@ class AppDriver:
                 prefix = ()
         counter = {"count": 0, "truncated": False}
         tree = self._dump_tree(
-            control, max_depth, detailed, max_nodes, 0, counter, prefix
+            control, max_depth, detailed, max_nodes, 0, counter, prefix,
+            element_ids,
         )
         tree["node_count"] = counter["count"]
         tree["truncated"] = counter["truncated"]
         return tree
 
     def _dump_tree(self, control: auto.Control, max_depth: int, detailed: bool,
-                   max_nodes: int, depth: int, counter: dict, path: tuple) -> dict:
+                   max_nodes: int, depth: int, counter: dict, path: tuple,
+                   element_ids: bool = False) -> dict:
         counter["count"] += 1
         info = self._get_control_info(control, detailed=detailed)
         info["depth"] = depth
-        info["ref"] = ".".join(str(index) for index in (0,) + path)
+        tree_ref = ".".join(str(index) for index in (0,) + path)
+        info["ref"] = tree_ref
+        if element_ids:
+            info["element_id"] = self.register_element(control, tree_ref)
         if depth >= max_depth:
             info["child_count"] = len(control.GetChildren())
             return info
@@ -842,7 +1128,7 @@ class AppDriver:
                 break
             rendered.append(self._dump_tree(
                 child, max_depth, detailed, max_nodes, depth + 1, counter,
-                path + (index,),
+                path + (index,), element_ids,
             ))
         info["children"] = rendered
         return info
@@ -1036,9 +1322,14 @@ _driver_cache: dict = {}
 
 
 def get_cached_driver(window_title: str = None, process_name: str = None,
-                      window_class: str = None, timeout: int = 5) -> AppDriver:
+                      window_class: str = None, timeout: int = 5,
+                      window_id: str = None) -> AppDriver:
     """Get or create a cached AppDriver. Avoids repeated window lookups."""
-    key = (window_title, process_name, window_class)
+    key = (
+        (window_title, process_name, window_class, str(window_id))
+        if window_id
+        else (window_title, process_name, window_class)
+    )
     cached = _driver_cache.get(key)
     if cached is not None:
         try:
@@ -1055,6 +1346,7 @@ def get_cached_driver(window_title: str = None, process_name: str = None,
         process_name=process_name,
         window_class=window_class,
         timeout=timeout,
+        window_id=window_id,
     )
     _ = driver.window
     _driver_cache[key] = driver

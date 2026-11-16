@@ -15,8 +15,13 @@ class ConfigDiscoveryTests(unittest.TestCase):
             with patch.dict(os.environ, {"ACCESSIBILITY_INSIGHTS_PATH": exe}):
                 self.assertEqual(config.find_accessibility_insights(), os.path.abspath(exe))
 
+    def test_ocr_model_candidates_use_override_then_bundled_models_only(self):
+        with patch.dict(os.environ, {"WINUI_OCR_MODEL_DIR": "override-models"}):
+            candidates = config._ocr_model_candidates()
+        self.assertEqual(candidates, ["override-models", config._OCR_MODEL_DIR])
+
     def test_missing_environment_path_returns_none_when_no_install_found(self):
-        with patch.dict(os.environ, {"ACCESSIBILITY_INSIGHTS_PATH": r"C:\missing\AccessibilityInsights.exe"}), \
+        with patch.dict(os.environ, {"ACCESSIBILITY_INSIGHTS_PATH": os.path.join("missing", "AccessibilityInsights.exe")}), \
              patch.object(config, "_candidate_paths", return_value=[]):
             self.assertIsNone(config.find_accessibility_insights())
 

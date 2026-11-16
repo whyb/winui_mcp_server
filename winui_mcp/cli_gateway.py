@@ -14,6 +14,7 @@ import json
 import subprocess
 import argparse
 
+from . import apps
 from . import config
 from . import skills_library as sk
 from .driver import AppDriver
@@ -25,42 +26,81 @@ def print_result(result: dict):
 
 def _toggle_handler(driver: AppDriver, kw: dict) -> dict:
     """Handle toggle command: flip if no flag, or force --enable/--disable."""
-    partial = kw.get("partial", True)
-    index = kw.get("index", 0)
-    if kw.get("enable"):
-        return sk.toggle_by_name(driver, kw["name"], True, partial, index)
-    if kw.get("disable"):
-        return sk.toggle_by_name(driver, kw["name"], False, partial, index)
-    # Neither flag: flip current state by reading ToggleState first
-    matches = driver.find_by_name(kw["name"], partial=partial)
-    if not matches:
-        return sk._fail(sk._hint_no_control(driver, kw["name"], "name"))
-    try:
-        ctrl = sk._select_match(driver, matches, index, kw["name"])
-    except Exception as e:
-        return sk._fail(str(e))
-    try:
-        current = ctrl.GetTogglePattern().ToggleState
-        new_state = not bool(current)
-    except Exception:
-        new_state = True  # Can't read state, assume off -> toggle on
-    return sk.toggle_by_name(driver, kw["name"], new_state, partial, index)
+    enable = True if kw.get("enable") else False if kw.get("disable") else None
+    return sk.toggle_by_reference(
+        driver,
+        enable=enable,
+        element_id=kw.get("element_id"),
+        ref=kw.get("ref"),
+        name=kw.get("name"),
+        control_class=kw.get("class_name"),
+        index=kw.get("index", 0),
+        partial=kw.get("partial", True),
+    )
 
 
 def make_driver(window_title: str = None, window_class: str = None,
-                process_name: str = None) -> AppDriver:
-    """Create an AppDriver from --window or --processname args."""
-    if not window_title and not process_name:
-        print("Error: Specify --window \"App Title\" or --processname <process>")
+                process_name: str = None, window_id: str = None) -> AppDriver:
+    """Create an AppDriver from --window-id, --window, or --processname."""
+    if not window_id and not window_title and not process_name:
+        print(
+            "Error: Specify --window-id <0x...>, --window \"App Title\", "
+            "or --processname <process>"
+        )
         sys.exit(1)
     return AppDriver(
         window_title=window_title,
         window_class=window_class,
         process_name=process_name,
+        window_id=window_id,
     )
 
 
 COMMANDS = {
+    "list-apps": {
+        "func": lambda d, **kw: {
+            "success": True,
+            "message": "Supported application profiles",
+            "data": {"apps": apps.list_app_profiles()},
+        },
+        "desc": "List supported built-in and common Windows apps",
+        "args": [],
+        "target_required": False,
+    },
+    "launch-app": {
+        "func": lambda d, **kw: sk.launch_app(
+            d, kw["app"], kw.get("arguments"), kw.get("timeout", 12)
+        ),
+        "desc": "Launch a supported app and bind its window",
+        "args": [
+            {"name": "--app", "type": str, "required": True, "help": "App id from list-apps"},
+            {"name": "--arguments", "type": str, "default": None, "help": "URL, file path, or deep-link suffix"},
+            {"name": "--timeout", "type": float, "default": 12, "help": "Window discovery timeout"},
+        ],
+        "target_required": False,
+    },
+    "snapshot": {
+        "func": lambda d, **kw: sk.snapshot(
+            d, kw.get("depth", 20), kw.get("max_nodes", 300),
+            kw.get("interactive_only", True), kw.get("query"),
+            kw.get("include_ocr", False),
+        ),
+        "desc": "Return a compact snapshot with stable element ids",
+        "args": [
+            {"name": "--depth", "type": int, "default": 20, "help": "Tree depth (default 20)"},
+            {"name": "--max-nodes", "type": int, "default": 300, "help": "Maximum elements (default 300)"},
+            {"name": "--include-noninteractive", "action": "store_false", "dest": "interactive_only", "default": True, "help": "Include labels and containers"},
+            {"name": "--query", "type": str, "default": None, "help": "Filter by visible or accessible text"},
+            {"name": "--ocr", "action": "store_true", "dest": "include_ocr", "default": False, "help": "Bind OCR text before returning elements"},
+        ],
+    },
+    "window-action": {
+        "func": lambda d, **kw: sk.window_action(d, kw["window_action"]),
+        "desc": "Focus, minimize, maximize, restore, or close a window",
+        "args": [
+            {"name": "--action", "dest": "window_action", "type": str, "required": True, "choices": ["focus", "minimize", "maximize", "restore", "close"], "help": "Window action"},
+        ],
+    },
     "discover": {
         "func": lambda d, **kw: sk.discover_ui(
             d, kw.get("name"), kw.get("class_name"), kw.get("depth", 2), False,
@@ -112,27 +152,28 @@ COMMANDS = {
         ],
     },
     "click": {
-        "func": lambda d, **kw: (
-            sk.click_ref(d, kw["ref"], "click")
-            if kw.get("ref") else
-            sk.click_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
-            if kw.get("name") else
-            sk.click_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
+        "func": lambda d, **kw: sk.activate_reference(
+            d, "click", kw.get("element_id"), kw.get("ref"), kw.get("name"),
+            kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)
         ),
-        "desc": "Click a control by ref, name, or class",
+        "desc": "Click a control by element id, ref, name, or class",
         "args": [
-            {"name": "--ref", "type": str, "default": None, "help": "Control ref from dump-tree/ocr-scan (e.g. 0.2.1)"},
-            {"name": "--name", "type": str, "default": None, "help": "Control name (substring match)"},
-            {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot (recommended)"},
+            {"name": "--ref", "type": str, "default": None, "help": "Legacy control ref from dump-tree/ocr-scan"},
+            {"name": "--name", "type": str, "default": None, "help": "Control name fallback"},
+            {"name": "--class", "type": str, "default": None, "help": "Control class fallback", "dest": "class_name"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
             {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "toggle": {
         "func": lambda d, **kw: _toggle_handler(d, kw),
-        "desc": "Toggle a checkbox/switch by name (default: flip current state)",
+        "desc": "Toggle a checkbox/switch (default: flip current state)",
         "args": [
-            {"name": "--name", "type": str, "required": True, "help": "Control name"},
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot"},
+            {"name": "--ref", "type": str, "default": None, "help": "Legacy control ref"},
+            {"name": "--name", "type": str, "default": None, "help": "Control name fallback"},
+            {"name": "--class", "type": str, "default": None, "help": "Control class fallback", "dest": "class_name"},
             {"name": "--enable", "action": "store_true", "default": None, "help": "Force checked state"},
             {"name": "--disable", "action": "store_true", "default": None, "dest": "disable", "help": "Force unchecked state"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
@@ -140,43 +181,65 @@ COMMANDS = {
         ],
     },
     "type": {
-        "func": lambda d, **kw: sk.type_in(d, kw["text"], kw.get("name"), kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)),
-        "desc": "Type text into a control (or focused element)",
+        "func": lambda d, **kw: sk.type_text_by_reference(
+            d, kw["text"], kw.get("element_id"), kw.get("ref"), kw.get("name"),
+            kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)
+        ),
+        "desc": "Type text into an element id/locator or the focused control",
         "args": [
             {"name": "--text", "type": str, "required": True, "help": "Text to type"},
-            {"name": "--name", "type": str, "default": None, "help": "Target control name"},
-            {"name": "--class", "type": str, "default": None, "help": "Target control class", "dest": "class_name"},
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot"},
+            {"name": "--ref", "type": str, "default": None, "help": "Legacy control ref"},
+            {"name": "--name", "type": str, "default": None, "help": "Target control name fallback"},
+            {"name": "--class", "type": str, "default": None, "help": "Target control class fallback", "dest": "class_name"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
             {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "set-value": {
-        "func": lambda d, **kw: sk.set_value_by_name(d, kw["name"], kw["value"], kw.get("partial", True), kw.get("index", 0)),
-        "desc": "Set value of an edit/spinbox by name",
+        "func": lambda d, **kw: sk.set_value_by_reference(
+            d, kw["value"], kw.get("element_id"), kw.get("ref"), kw.get("name"),
+            kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)
+        ),
+        "desc": "Set and verify a value-capable control",
         "args": [
-            {"name": "--name", "type": str, "required": True, "help": "Control name"},
             {"name": "--value", "type": str, "required": True, "help": "Value to set"},
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot"},
+            {"name": "--ref", "type": str, "default": None, "help": "Legacy control ref"},
+            {"name": "--name", "type": str, "default": None, "help": "Control name fallback"},
+            {"name": "--class", "type": str, "default": None, "help": "Control class fallback", "dest": "class_name"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
             {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "get-value": {
-        "func": lambda d, **kw: sk.get_value_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0)),
-        "desc": "Read value of a control by name",
+        "func": lambda d, **kw: sk.get_value_by_reference(
+            d, kw.get("element_id"), kw.get("ref"), kw.get("name"),
+            kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)
+        ),
+        "desc": "Read a value-capable control",
         "args": [
-            {"name": "--name", "type": str, "required": True, "help": "Control name"},
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot"},
+            {"name": "--ref", "type": str, "default": None, "help": "Legacy control ref"},
+            {"name": "--name", "type": str, "default": None, "help": "Control name fallback"},
+            {"name": "--class", "type": str, "default": None, "help": "Control class fallback", "dest": "class_name"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
             {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
     },
     "combo-select": {
-        "func": lambda d, **kw: sk.select_in_combo(d, kw["item"], kw.get("name"), kw.get("class_name"), kw.get("combo_index", 0), kw.get("partial", True)),
-        "desc": "Select an item from a combobox",
+        "func": lambda d, **kw: sk.combo_select_by_reference(
+            d, kw["item"], kw.get("element_id"), kw.get("ref"), kw.get("name"),
+            kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)
+        ),
+        "desc": "Select and verify a combobox item",
         "args": [
             {"name": "--item", "type": str, "required": True, "help": "Item text to select"},
-            {"name": "--name", "type": str, "default": None, "help": "Combobox name"},
-            {"name": "--class", "type": str, "default": None, "help": "Combobox class", "dest": "class_name"},
-            {"name": "--combo-index", "type": int, "default": 0, "help": "Nth matching combobox (default 0)"},
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot"},
+            {"name": "--ref", "type": str, "default": None, "help": "Legacy control ref"},
+            {"name": "--name", "type": str, "default": None, "help": "Combobox name fallback"},
+            {"name": "--class", "type": str, "default": None, "help": "Combobox class fallback", "dest": "class_name"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth matching combobox (default 0)"},
             {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact combobox name match"},
         ],
     },
@@ -193,15 +256,13 @@ COMMANDS = {
 
     # ── Mouse ──
     "double-click": {
-        "func": lambda d, **kw: (
-            sk.click_ref(d, kw["ref"], "double_click")
-            if kw.get("ref") else
-            sk.double_click_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
-            if kw.get("name") else
-            sk.double_click_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
+        "func": lambda d, **kw: sk.activate_reference(
+            d, "double_click", kw.get("element_id"), kw.get("ref"), kw.get("name"),
+            kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)
         ),
-        "desc": "Double-click a control by name or class",
+        "desc": "Double-click by element id, ref, name, or class",
         "args": [
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot (recommended)"},
             {"name": "--ref", "type": str, "default": None, "help": "Control ref from dump-tree/ocr-scan"},
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
@@ -210,15 +271,13 @@ COMMANDS = {
         ],
     },
     "right-click": {
-        "func": lambda d, **kw: (
-            sk.click_ref(d, kw["ref"], "right_click")
-            if kw.get("ref") else
-            sk.right_click_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
-            if kw.get("name") else
-            sk.right_click_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
+        "func": lambda d, **kw: sk.activate_reference(
+            d, "right_click", kw.get("element_id"), kw.get("ref"), kw.get("name"),
+            kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)
         ),
-        "desc": "Right-click a control by name or class",
+        "desc": "Right-click by element id, ref, name, or class",
         "args": [
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot (recommended)"},
             {"name": "--ref", "type": str, "default": None, "help": "Control ref from dump-tree/ocr-scan"},
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
@@ -227,15 +286,13 @@ COMMANDS = {
         ],
     },
     "hover": {
-        "func": lambda d, **kw: (
-            sk.click_ref(d, kw["ref"], "hover")
-            if kw.get("ref") else
-            sk.hover_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0))
-            if kw.get("name") else
-            sk.hover_by_class(d, kw["class_name"], kw.get("index", 0), kw.get("partial", True))
+        "func": lambda d, **kw: sk.activate_reference(
+            d, "hover", kw.get("element_id"), kw.get("ref"), kw.get("name"),
+            kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)
         ),
-        "desc": "Hover (move mouse to) a control by name or class",
+        "desc": "Hover by element id, ref, name, or class",
         "args": [
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot (recommended)"},
             {"name": "--ref", "type": str, "default": None, "help": "Control ref from dump-tree/ocr-scan"},
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
@@ -246,18 +303,36 @@ COMMANDS = {
 
     # ── Scroll ──
     "scroll-up": {
-        "func": lambda d, **kw: sk.scroll_up_by_name(d, kw.get("name"), kw.get("count", 3)),
-        "desc": "Scroll up on a control or the window",
+        "func": lambda d, **kw: sk.scroll_by_reference(
+            d, "up", kw.get("count", 3), kw.get("element_id"),
+            kw.get("ref"), kw.get("name"), kw.get("class_name"),
+            kw.get("index", 0), kw.get("partial", True)
+        ),
+        "desc": "Scroll up on an element id or the window",
         "args": [
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot"},
+            {"name": "--ref", "type": str, "default": None, "help": "Legacy control ref"},
             {"name": "--name", "type": str, "default": None, "help": "Target control name (omit for window)"},
+            {"name": "--class", "type": str, "default": None, "help": "Target control class", "dest": "class_name"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Exact name match"},
             {"name": "--count", "type": int, "default": 3, "help": "Number of scroll ticks (default 3)"},
         ],
     },
     "scroll-down": {
-        "func": lambda d, **kw: sk.scroll_down_by_name(d, kw.get("name"), kw.get("count", 3)),
-        "desc": "Scroll down on a control or the window",
+        "func": lambda d, **kw: sk.scroll_by_reference(
+            d, "down", kw.get("count", 3), kw.get("element_id"),
+            kw.get("ref"), kw.get("name"), kw.get("class_name"),
+            kw.get("index", 0), kw.get("partial", True)
+        ),
+        "desc": "Scroll down on an element id or the window",
         "args": [
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot"},
+            {"name": "--ref", "type": str, "default": None, "help": "Legacy control ref"},
             {"name": "--name", "type": str, "default": None, "help": "Target control name (omit for window)"},
+            {"name": "--class", "type": str, "default": None, "help": "Target control class", "dest": "class_name"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Exact name match"},
             {"name": "--count", "type": int, "default": 3, "help": "Number of scroll ticks (default 3)"},
         ],
     },
@@ -302,10 +377,16 @@ COMMANDS = {
         ],
     },
     "get-text": {
-        "func": lambda d, **kw: sk.get_text_by_name(d, kw["name"], kw.get("partial", True), kw.get("index", 0)),
+        "func": lambda d, **kw: sk.get_value_by_reference(
+            d, kw.get("element_id"), kw.get("ref"), kw.get("name"),
+            kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)
+        ),
         "desc": "Read the Name text of a control (labels, headers, buttons)",
         "args": [
-            {"name": "--name", "type": str, "required": True, "help": "Control name"},
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot"},
+            {"name": "--ref", "type": str, "default": None, "help": "Legacy control ref"},
+            {"name": "--name", "type": str, "default": None, "help": "Control name fallback"},
+            {"name": "--class", "type": str, "default": None, "help": "Control class fallback", "dest": "class_name"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
             {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],
@@ -363,8 +444,9 @@ def main():
 
     # ── help ──
     if len(sys.argv) >= 2 and sys.argv[1] in ("-h", "--help", "help"):
-        print("Usage: python cli_gateway.py [--window TITLE | --processname NAME] <command> [args]\n")
+        print("Usage: python cli_gateway.py [--window-id ID | --window TITLE | --processname NAME] <command> [args]\n")
         print("Options:")
+        print("  --window-id ID       Native window id from list-windows (recommended)")
         print("  --window TITLE       Window title (exact match first, then fuzzy)")
         print("  --processname NAME   Process name (e.g. notepad.exe)")
         print("  --class CLASS        Window class name filter (used with --window)\n")
@@ -378,14 +460,17 @@ def main():
     window_title = None
     window_class = None
     process_name = None
+    window_id = None
     filtered_argv = sys.argv[1:]
 
-    for flag in ("--window", "--processname", "--class"):
+    for flag in ("--window-id", "--window", "--processname", "--class"):
         for i, arg in enumerate(filtered_argv):
             if arg == flag and i + 1 < len(filtered_argv):
                 val = filtered_argv[i + 1]
                 filtered_argv = filtered_argv[:i] + filtered_argv[i + 2:]
-                if flag == "--window":
+                if flag == "--window-id":
+                    window_id = val
+                elif flag == "--window":
                     window_title = val
                 elif flag == "--processname":
                     process_name = val
@@ -395,7 +480,9 @@ def main():
             elif arg.startswith(flag + "="):
                 val = arg.split("=", 1)[1]
                 filtered_argv = filtered_argv[:i] + filtered_argv[i + 1:]
-                if flag == "--window":
+                if flag == "--window-id":
+                    window_id = val
+                elif flag == "--window":
                     window_title = val
                 elif flag == "--processname":
                     process_name = val
@@ -410,13 +497,13 @@ def main():
     action = filtered_argv[0]
 
     if action in ("-h", "--help", "help"):
-        print("Usage: python cli_gateway.py [--window TITLE | --processname NAME] <command> [args]")
+        print("Usage: python cli_gateway.py [--window-id ID | --window TITLE | --processname NAME] <command> [args]")
         sys.exit(0)
 
     # ── Execute command ──
     if action not in COMMANDS:
         print(f"Error: Unknown command '{action}'.")
-        print(f"Run 'python cli_gateway.py --help' to see available commands.")
+        print("Run 'python cli_gateway.py --help' to see available commands.")
         sys.exit(1)
 
     cmd = COMMANDS[action]
@@ -425,7 +512,7 @@ def main():
         sys.exit(0)
 
     if cmd.get("target_required", True):
-        driver = make_driver(window_title, window_class, process_name)
+        driver = make_driver(window_title, window_class, process_name, window_id)
     else:
         driver = AppDriver()
 

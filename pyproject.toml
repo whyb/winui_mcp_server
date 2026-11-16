@@ -4,20 +4,45 @@ build-backend = "hatchling.build"
 
 [project]
 name = "winui-mcp-server"
-version = "0.3.0"
+version = "0.4.0"
 description = "MCP server for Windows UI Automation — control any Windows app from AI agents"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
-    "mcp[cli]",
-    "uiautomation",
-    "onnxruntime>=1.18",
-    "opencv-python>=4.8",
+    "mcp[cli]>=1.20,<2",
+    "uiautomation>=2.0.20",
+    "onnxruntime>=1.18,<1.24",
+    "opencv-python>=4.8,<6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+    "ruff>=0.14,<1",
 ]
 
 [project.scripts]
 winui-mcp = "winui_mcp.mcp_server:main"
+winui-mcp-cli = "winui_mcp.cli_gateway:main"
+
+[project.urls]
+Homepage = "https://github.com/whyb/winui_mcp_server"
+Issues = "https://github.com/whyb/winui_mcp_server/issues"
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "integration: launches or controls real Windows applications",
+    "app_smoke: broad compatibility smoke tests for common Windows applications",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["winui_mcp"]
@@ -25,9 +50,11 @@ packages = ["winui_mcp"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/winui_mcp",
-    "/references",
     "/README.md",
     "/README.cn.md",
+    "/server.json",
+    "/docs",
+    "/skills",
     "/LICENSE",
     "/pyproject.toml",
 ]
