@@ -11,9 +11,18 @@ class AppCatalogTests(unittest.TestCase):
         self.assertEqual(apps.get_profile("vs code").id, "vscode")
         self.assertEqual(apps.get_profile("msedge.exe").id, "edge")
 
-    def test_profile_match_prefers_process_name(self):
-        profile = apps.match_profile("Untitled - Notepad", "notepad.exe")
+    def test_profile_match_prefers_specific_process_name(self):
+        profile = apps.match_profile("Some unrelated title", "notepad.exe")
         self.assertEqual(profile.id, "notepad")
+
+    def test_generic_uwp_host_uses_window_title(self):
+        calculator = apps.match_profile("计算器", "ApplicationFrameHost.exe")
+        settings = apps.match_profile("设置", "ApplicationFrameHost.exe")
+        self.assertEqual(calculator.id, "calculator")
+        self.assertEqual(settings.id, "settings")
+
+    def test_generic_uwp_host_without_title_is_not_misidentified(self):
+        self.assertIsNone(apps.match_profile("", "ApplicationFrameHost.exe"))
 
     def test_public_catalog_does_not_expose_install_paths(self):
         with patch.object(apps, "resolve_launch_plan", side_effect=apps.resolve_launch_plan):
@@ -43,6 +52,23 @@ class AppCatalogTests(unittest.TestCase):
             apps.launch_application("notepad", arguments="demo.txt")
         popen.assert_called_once_with(
             ["notepad.exe", "demo.txt"], close_fds=True
+        )
+
+    def test_launch_executable_passes_argument_list_without_shell(self):
+        plan = apps.LaunchPlan(
+            app=apps.get_profile("vscode"),
+            target="Code.exe",
+            kind="executable",
+            source="test",
+        )
+        with patch.object(apps, "resolve_launch_plan", return_value=plan), \
+             patch.object(apps.os, "name", "nt"), \
+             patch.object(apps.subprocess, "Popen") as popen:
+            apps.launch_application(
+                "vscode", arguments=["--new-window", "D:/fixture/winui"]
+            )
+        popen.assert_called_once_with(
+            ["Code.exe", "--new-window", "D:/fixture/winui"], close_fds=True
         )
 
     def test_uri_launch_uses_startfile(self):

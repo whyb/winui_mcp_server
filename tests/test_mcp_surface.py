@@ -8,9 +8,10 @@ class McpSurfaceTests(unittest.TestCase):
     def test_documented_tool_count_and_agent_first_names(self):
         tools = asyncio.run(mcp.list_tools())
         names = {tool.name for tool in tools}
-        self.assertEqual(len(tools), 31)
+        self.assertEqual(len(tools), 33)
         self.assertTrue({
-            "launch_app", "snapshot", "run_actions", "ocr_scan", "reset_driver"
+            "launch_app", "snapshot", "run_actions", "ocr_scan", "reset_driver",
+            "move_window", "drag_control",
         }.issubset(names))
 
     def test_tools_have_structured_output_and_annotations(self):

@@ -12,6 +12,7 @@ real MCP client would reload the server.
 | MCP protocol | Real stdio client, discovery, structured output, Notepad | `WINUI_RUN_INTEGRATION=1 uv run --extra dev python -m pytest tests/integration/test_mcp_stdio.py -q` |
 | Existing-app smoke | Read-only snapshots of open common apps | `WINUI_RUN_APP_SMOKE=1 uv run --extra dev python -m pytest tests/integration/test_common_app_smoke.py -q` |
 | Launch matrix | Launch, bind, snapshot, and safely clean up common apps | `WINUI_RUN_APP_LAUNCH=1 uv run --extra dev python -m pytest tests/integration/test_app_launch_matrix.py -q` |
+| App interaction | Notepad drag/type/copy/paste/menu/scroll/close plus random Calculator arithmetic | `WINUI_RUN_APP_INTERACTION=1 uv run --extra dev python -m pytest tests/integration/test_app_interactions.py tests/integration/test_calculator_interaction.py -q` |
 
 For local development on Windows, a Conda environment named `winui_mcp_server`
 is supported without repackaging the project:
@@ -31,6 +32,7 @@ Live tests are skipped by default because they control real desktop applications
 - `WINUI_RUN_APP_SMOKE=1`: enable read-only common-app inspection.
 - `WINUI_SMOKE_APPS=settings,explorer,vscode,edge`: select smoke-test apps.
 - `WINUI_RUN_APP_LAUNCH=1`: enable the launch matrix.
+- `WINUI_RUN_APP_INTERACTION=1`: enable live Notepad and Calculator interaction tests.
 - `WINUI_LAUNCH_APPS=notepad,calculator,paint,...`: select launch-matrix apps.
 
 The launch matrix closes a window only when it was opened by the test or carries
@@ -48,10 +50,13 @@ The default launch matrix covers:
 - Visual Studio Code
 - Microsoft Edge
 - Google Chrome
-- Windows Media Player
 
-Each successful case verifies application launch or reuse, deterministic window
-binding, a bounded snapshot, and cleanup where safe.
+Each successful case verifies application launch, deterministic window binding,
+a bounded snapshot, and that any test-owned window disappears after close.
+VSCode, Edge, and Chrome use isolated profiles/new windows so cleanup cannot
+close an existing user window. The Calculator interaction test performs random
+continuous add/subtract/multiply/divide operations, presses equals, verifies the
+displayed result, and then verifies the test-owned Calculator window disappears.
 
 ## Release checks
 

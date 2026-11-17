@@ -110,7 +110,7 @@ _APP_PROFILES = (
         category="built-in",
         aliases=("paint", "mspaint", "画图"),
         process_names=("mspaint.exe", "paintapp.exe", "applicationframehost.exe"),
-        launch_targets=("mspaint.exe", "ms-paint:"),
+        launch_targets=("ms-paint:", "mspaint.exe"),
         description="Automate Paint tools, colors, canvas, save, and export dialogs.",
         workflow=("launch_app(paint)", "snapshot", "select a tool", "perform canvas or menu actions"),
         tips=(
@@ -275,13 +275,21 @@ def get_profile(app: str) -> AppProfile:
     return profile
 
 
+_GENERIC_UWP_HOSTS = {"applicationframehost.exe"}
+
+
 def match_profile(
     window_title: str | None = None,
     process_name: str | None = None,
 ) -> AppProfile | None:
-    """Best-effort profile match for a live window."""
-    if process_name:
-        proc = os.path.basename(process_name).casefold()
+    """Best-effort profile match for a live window.
+
+    ApplicationFrameHost hosts several UWP apps, so its process name cannot identify
+    Calculator, Settings, or Paint. For that generic host, the window title decides
+    the profile instead of whichever application happens to appear first.
+    """
+    proc = os.path.basename(process_name).casefold() if process_name else ""
+    if proc and proc not in _GENERIC_UWP_HOSTS:
         for profile in _APP_PROFILES:
             if proc in profile.process_names:
                 return profile
@@ -327,18 +335,28 @@ def resolve_launch_plan(app: str) -> LaunchPlan:
     )
 
 
-def launch_application(app: str, arguments: str | None = None) -> LaunchPlan:
-    """Launch a catalog application and return its path-free resolution plan."""
+def launch_application(
+    app: str,
+    arguments: str | list[str] | tuple[str, ...] | None = None,
+) -> LaunchPlan:
+    """Launch a catalog application and return its path-free resolution plan.
+
+    arguments may be one string for document/URL/deep-link launches or a list of
+    command-line arguments when an app needs flags such as --new-window or
+    --user-data-dir. Lists are passed without a shell.
+    """
     _ensure_windows()
     plan = resolve_launch_plan(app)
+    if isinstance(arguments, str) or arguments is None:
+        argument_list = [arguments] if arguments else []
+    else:
+        argument_list = [str(item) for item in arguments if str(item)]
     if plan.kind == "uri":
         target = plan.target
-        if arguments:
-            target = target.rstrip("/") + arguments
+        if argument_list:
+            target = target.rstrip("/") + argument_list[0]
         os.startfile(target)  # type: ignore[attr-defined]
         return plan
-    command = [plan.target]
-    if arguments:
-        command.append(arguments)
+    command = [plan.target, *argument_list]
     subprocess.Popen(command, close_fds=True)
     return plan

@@ -1544,7 +1544,8 @@ def run_actions(
 
 
 
-def launch_app(driver: AppDriver, app: str, arguments: str = None,
+def launch_app(driver: AppDriver, app: str,
+               arguments: str | list[str] | tuple[str, ...] | None = None,
                timeout: float = 12) -> dict:
     """Launch a catalog app and bind the resulting window without exposing paths."""
     try:
@@ -1557,7 +1558,12 @@ def launch_app(driver: AppDriver, app: str, arguments: str = None,
         }
 
         plan = apps.launch_application(app, arguments)
-        deadline = time.time() + max(1.0, min(float(timeout), 60.0))
+        started_at = time.time()
+        timeout_seconds = max(1.0, min(float(timeout), 60.0))
+        deadline = started_at + timeout_seconds
+        # Existing windows are not proof that a requested launch completed. Give a
+        # newly requested isolated/new window a short grace period before reusing one.
+        fallback_deadline = started_at + min(5.0, timeout_seconds)
         fallback = None
         while time.time() < deadline:
             candidates = []
@@ -1595,10 +1601,19 @@ def launch_app(driver: AppDriver, app: str, arguments: str = None,
                     info["title"] = title
                     info["visible"] = bool(record.get("visible"))
                     profile_match = apps.match_profile(title, process)
-                    process_match = process.casefold() in profile.process_names
+                    process_match = (
+                        process.casefold() in profile.process_names
+                        and process.casefold() not in apps._GENERIC_UWP_HOSTS
+                    )
                     title_match = any(
                         term.casefold() in title.casefold()
                         for term in (profile.name, *profile.aliases)
+                    )
+                    window_class = str(info.get("class") or record.get("class") or "")
+                    frame_bonus = (
+                        8 if window_class == "ApplicationFrameWindow"
+                        else -4 if window_class == "Windows.UI.Core.CoreWindow"
+                        else 0
                     )
                     candidate = {
                         "window": {
@@ -1614,9 +1629,12 @@ def launch_app(driver: AppDriver, app: str, arguments: str = None,
                             (8 if process_match else 0)
                             + (4 if title_match else 0)
                             + (3 if info.get("control_type") == "WindowControl" else 0)
+                            + frame_bonus
                         ),
                     }
-                    if profile_match and profile_match.id == profile.id:
+                    if profile_match and profile_match.id == profile.id and (
+                        process_match or title_match
+                    ):
                         candidates.append(candidate)
                     elif handle not in baseline and (process_match or title_match):
                         candidates.append(candidate)
@@ -1627,17 +1645,21 @@ def launch_app(driver: AppDriver, app: str, arguments: str = None,
             if candidates:
                 candidates.sort(key=lambda item: (not item["new"], -item["score"]))
                 chosen = candidates[0]
-                return _ok(
-                    f"Launched {profile.name} and bound its window",
-                    {
-                        "app": {"id": profile.id, "name": profile.name},
-                        "window": chosen["window"],
-                        "new_window": chosen["new"],
-                        "reused_window": not chosen["new"],
-                        "launch_kind": plan.kind,
-                        "hint": "Call snapshot with this window_id before acting.",
-                    },
-                )
+                if chosen["new"]:
+                    return _ok(
+                        f"Launched {profile.name} and bound its window",
+                        {
+                            "app": {"id": profile.id, "name": profile.name},
+                            "window": chosen["window"],
+                            "new_window": chosen["new"],
+                            "reused_window": not chosen["new"],
+                            "launch_kind": plan.kind,
+                            "hint": "Call snapshot with this window_id before acting.",
+                        },
+                    )
+                fallback = chosen
+                if time.time() >= fallback_deadline:
+                    break
             time.sleep(0.25)
 
         if fallback:
@@ -1679,19 +1701,89 @@ def window_action(driver: AppDriver, action: str = "focus") -> dict:
         elif action_name == "restore":
             win.Restore()
         elif action_name == "close":
-            driver.close_window()
+            strategy = driver.close_window()
         else:
             return _fail(
                 f"Unsupported window action {action!r}. "
                 "Use focus, minimize, maximize, restore, or close."
             )
+        data = {"action": action_name, "window_id": window_id, "title": title}
+        if action_name == "close":
+            data["strategy"] = strategy
         return _ok(
             f"Window action '{action_name}' completed",
-            {"action": action_name, "window_id": window_id, "title": title},
-            verified=False,
+            data,
+            verified=action_name == "close" or None,
         )
     except Exception as exc:
         return _fail(f"Window action failed: {exc}")
+
+
+def move_window(driver: AppDriver, x: int | None = None, y: int | None = None,
+                delta_x: int = 0, delta_y: int = 0,
+                method: str = "mouse") -> dict:
+    """Move the bound window by dragging its title bar or to an absolute position."""
+    try:
+        method_name = (method or "mouse").strip().lower()
+        if method_name not in {"mouse", "setwindowpos"}:
+            return _fail(
+                f"Unsupported move method {method!r}. Use 'mouse' or 'setwindowpos'."
+            )
+        win = driver.window
+        before = win.BoundingRectangle
+        old = {"left": before.left, "top": before.top}
+        if method_name == "setwindowpos":
+            if x is None or y is None:
+                return _fail("setwindowpos requires absolute x and y values.")
+            driver.move_window(int(x), int(y))
+        else:
+            driver.move_window_by_mouse(delta_x, delta_y)
+        after = driver.window.BoundingRectangle
+        moved = (after.left, after.top) != (old["left"], old["top"])
+        return _ok(
+            f"Window moved from ({old['left']}, {old['top']}) to "
+            f"({after.left}, {after.top})",
+            {
+                "method": method_name,
+                "from": old,
+                "to": {"left": after.left, "top": after.top},
+                "delta": {"x": after.left - old["left"], "y": after.top - old["top"]},
+                "window_id": driver.window_id,
+            },
+            verified=moved,
+        )
+    except Exception as exc:
+        return _fail(f"Failed to move window: {exc}")
+
+
+def drag_control(driver: AppDriver, delta_x: int = 0, delta_y: int = 0,
+                 element_id: str = None, ref: str = None, name: str = None,
+                 control_class: str = None, index: int = 0,
+                 partial: bool = False) -> dict:
+    """Drag a control such as a scrollbar thumb from its center by a pixel delta."""
+    try:
+        ctrl, target = _resolve_control(
+            driver, element_id, ref, name, control_class, index, partial
+        )
+        info = driver._get_control_info(ctrl)
+        before = ctrl.BoundingRectangle
+        driver.drag_control(ctrl, delta_x, delta_y)
+        after = ctrl.BoundingRectangle
+        moved = (after.left, after.top) != (before.left, before.top)
+        label = info.get("name") or info.get("auto_id") or element_id or ref
+        return _ok(
+            f"Dragged '{label}' by ({delta_x}, {delta_y})",
+            {
+                "control": info,
+                "target": target,
+                "delta": {"x": delta_x, "y": delta_y},
+                "from": {"left": before.left, "top": before.top},
+                "to": {"left": after.left, "top": after.top},
+            },
+            verified=moved,
+        )
+    except Exception as exc:
+        return _fail(f"Failed to drag control: {exc}")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

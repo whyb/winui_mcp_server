@@ -131,6 +131,8 @@ Cline、Kimi Code、DeepSeek Harness 以及本地 Conda 开发配置见
 ## 推荐 Agent 工作流
 
 1. 应用未启动时调用 `launch_app`；已启动时调用 `list_windows`。
+   `arguments` 可传路径/URL/深链接字符串，也可传参数列表以使用
+   `--new-window`、`--user-data-dir` 等启动参数。
 2. 保存返回的 `window_id`。
 3. 调用 `snapshot`；UI 较大时使用 `query` 缩小范围。
 4. 使用最新快照中的 `element_id` 执行点击、输入、设置值等操作。
@@ -148,10 +150,10 @@ Cline、Kimi Code、DeepSeek Harness 以及本地 Conda 开发配置见
 | 分类 | 工具 |
 |---|---|
 | 应用 | `list_apps`、`launch_app` |
-| 窗口 | `list_windows`、`get_window_state`、`focus_window`、`window_action`、`reset_driver` |
+| 窗口 | `list_windows`、`get_window_state`、`focus_window`、`window_action`、`move_window`、`reset_driver` |
 | 观察 | `snapshot`、`ocr_scan`、`find_control`、`wait_for` |
 | 兼容发现 | `discover`、`describe`、`dump_tree`、`get_control_rect` |
-| 鼠标 | `click`、`double_click`、`right_click`、`hover` |
+| 鼠标 | `click`、`double_click`、`right_click`、`hover`、`drag_control` |
 | 滚动 | `scroll_up`、`scroll_down` |
 | 键盘 | `send_key`、`send_hotkey`、`long_press_key`、`type_text` |
 | 值操作 | `get_value`、`get_text`、`set_value`、`toggle`、`combo_select` |
@@ -239,6 +241,9 @@ uv run --extra dev python -m pytest tests/integration/test_mcp_stdio.py -q
 
 $env:WINUI_RUN_APP_LAUNCH="1"
 uv run --extra dev python -m pytest tests/integration/test_app_launch_matrix.py -q
+
+$env:WINUI_RUN_APP_INTERACTION="1"
+uv run --extra dev python -m pytest tests/integration/test_app_interactions.py tests/integration/test_calculator_interaction.py -q
 ```
 
 测试矩阵、环境变量、本地 Conda 重载流程和发布检查见

@@ -138,6 +138,8 @@ client guidance.
 ## Recommended agent loop
 
 1. `launch_app` for a supported app, or `list_windows` for an existing app.
+   `arguments` accepts a path/URL/deep-link string or an argument list for
+   flags such as `--new-window` and `--user-data-dir`.
 2. Use the returned `window_id`.
 3. Call `snapshot`. Use `query` to narrow large UI trees.
 4. Act with `element_id` from the latest snapshot.
@@ -165,10 +167,10 @@ Read the full [agent guide](docs/AGENT_GUIDE.md).
 | Category | Tools |
 |---|---|
 | Applications | `list_apps`, `launch_app` |
-| Windows | `list_windows`, `get_window_state`, `focus_window`, `window_action`, `reset_driver` |
+| Windows | `list_windows`, `get_window_state`, `focus_window`, `window_action`, `move_window`, `reset_driver` |
 | Observation | `snapshot`, `ocr_scan`, `find_control`, `wait_for` |
 | Legacy discovery | `discover`, `describe`, `dump_tree`, `get_control_rect` |
-| Mouse | `click`, `double_click`, `right_click`, `hover` |
+| Mouse | `click`, `double_click`, `right_click`, `hover`, `drag_control` |
 | Scrolling | `scroll_up`, `scroll_down` |
 | Keyboard | `send_key`, `send_hotkey`, `long_press_key`, `type_text` |
 | Values | `get_value`, `get_text`, `set_value`, `toggle`, `combo_select` |
@@ -286,6 +288,9 @@ uv run --extra dev python -m pytest tests/integration/test_mcp_stdio.py -q
 
 $env:WINUI_RUN_APP_LAUNCH="1"
 uv run --extra dev python -m pytest tests/integration/test_app_launch_matrix.py -q
+
+$env:WINUI_RUN_APP_INTERACTION="1"
+uv run --extra dev python -m pytest tests/integration/test_app_interactions.py tests/integration/test_calculator_interaction.py -q
 ```
 
 See [docs/TESTING.md](docs/TESTING.md) for the matrix, environment gates, local

@@ -54,6 +54,8 @@ _user32.PostMessageW.argtypes = [
     ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM,
 ]
 _user32.PostMessageW.restype = ctypes.wintypes.BOOL
+_user32.IsWindow.argtypes = [ctypes.wintypes.HWND]
+_user32.IsWindow.restype = ctypes.wintypes.BOOL
 _user32.IsWindowVisible.argtypes = [ctypes.wintypes.HWND]
 _user32.IsWindowVisible.restype = ctypes.wintypes.BOOL
 _user32.GetWindowTextLengthW.argtypes = [ctypes.wintypes.HWND]
@@ -70,6 +72,12 @@ _user32.GetWindowRect.argtypes = [
     ctypes.wintypes.HWND, ctypes.POINTER(ctypes.wintypes.RECT)
 ]
 _user32.GetWindowRect.restype = ctypes.wintypes.BOOL
+_user32.SetWindowPos.argtypes = [
+    ctypes.wintypes.HWND, ctypes.wintypes.HWND,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.wintypes.UINT,
+]
+_user32.SetWindowPos.restype = ctypes.wintypes.BOOL
 _user32.EnumWindows.argtypes = [ctypes.c_void_p, ctypes.wintypes.LPARAM]
 _user32.EnumWindows.restype = ctypes.wintypes.BOOL
 
@@ -421,6 +429,23 @@ def _resolve_virtual_key(key: str) -> int:
     if not vk:
         raise ValueError(f"Unsupported key: {key!r}")
     return vk
+
+
+def _mouse_drag(start_x: int, start_y: int, end_x: int, end_y: int,
+                steps: int = 8, hold: float = 0.15) -> None:
+    """Drag the left mouse button from one screen point to another."""
+    auto.PressMouse(start_x, start_y, waitTime=0)
+    try:
+        time.sleep(hold)
+        for step in range(1, steps + 1):
+            x = start_x + (end_x - start_x) * step // steps
+            y = start_y + (end_y - start_y) * step // steps
+            auto.SetCursorPos(x, y)
+            time.sleep(0.02)
+        time.sleep(hold)
+    finally:
+        auto.ReleaseMouse(waitTime=0)
+    time.sleep(0.1)
 
 
 def _is_selectable_item(control: auto.Control) -> bool:
@@ -966,27 +991,189 @@ class AppDriver:
         ctrl = self.resolve(locator, timeout)
         return _read_toggle_state(ctrl)
 
-    def close_window(self) -> None:
-        """Ask the bound window to close using UIA, then WM_CLOSE as fallback."""
+    def _find_close_button(self) -> auto.Control | None:
+        """Find the top-level close button without relying on localized depth."""
+        for root in self.get_search_roots():
+            queue = [(root, 0)]
+            visited = 0
+            while queue and visited < 4000:
+                control, depth = queue.pop(0)
+                if depth >= 20:
+                    continue
+                try:
+                    children = control.GetChildren()
+                except Exception:
+                    continue
+                for child in children:
+                    visited += 1
+                    try:
+                        auto_id = str(child.AutomationId or "").casefold()
+                        name = _get_name(child).casefold()
+                        control_type = child.ControlTypeName
+                    except Exception:
+                        continue
+                    if control_type == "ButtonControl" and (
+                        auto_id in {"close", "closebutton", "systemclose"}
+                        or name in {"close", "关闭", "關閉"}
+                        or name.startswith("close ")
+                        or name.startswith("关闭 ")
+                        or name.startswith("關閉 ")
+                    ):
+                        return child
+                    queue.append((child, depth + 1))
+        return None
+
+    @staticmethod
+    def _window_is_gone(hwnd: int) -> bool:
+        """Return whether the native window is no longer a visible top-level window."""
+        if not hwnd:
+            return True
+        if not _user32.IsWindow(hwnd) or not _user32.IsWindowVisible(hwnd):
+            return True
+        try:
+            return not any(
+                int(record.get("handle") or 0) == hwnd
+                for record in enumerate_top_level_windows(visible_only=True)
+            )
+        except Exception:
+            return not bool(_user32.IsWindowVisible(hwnd))
+
+    def _wait_for_window_gone(self, hwnd: int, timeout: float = 2.0) -> bool:
+        """Poll until the target window is destroyed or no longer visible."""
+        deadline = time.time() + max(0.2, float(timeout))
+        while time.time() < deadline:
+            if self._window_is_gone(hwnd):
+                return True
+            time.sleep(0.05)
+        return self._window_is_gone(hwnd)
+
+    def close_window(self) -> str:
+        """Close the bound window and verify that it really disappeared.
+
+        UIA WindowPattern and the native close button are tried first, followed by
+        WM_SYSCOMMAND/SC_CLOSE, WM_CLOSE, and Alt+F4. A strategy is returned only
+        after the native window is destroyed or becomes non-visible.
+        """
         win = self.window
-        last_error = None
+        hwnd = _get_native_handle(win)
+        errors = []
+
+        def succeeded(strategy: str) -> bool:
+            if self._wait_for_window_gone(hwnd):
+                return True
+            errors.append(f"{strategy}: window still present")
+            return False
+
         try:
             win.GetWindowPattern().Close()
-            time.sleep(0.2)
-            return
+            if succeeded("uia-window-pattern"):
+                return "uia-window-pattern"
         except Exception as exc:
-            last_error = exc
+            errors.append(f"uia-window-pattern: {exc}")
+
         try:
-            win.Close()
-            time.sleep(0.2)
-            return
+            close_button = self._find_close_button()
+            if close_button is not None:
+                close_button.Click()
+                if succeeded("uia-close-button"):
+                    return "uia-close-button"
+            else:
+                errors.append("uia-close-button: not found")
         except Exception as exc:
-            last_error = exc
-        hwnd = _get_native_handle(win)
+            errors.append(f"uia-close-button: {exc}")
+
+        if hwnd and _user32.PostMessageW(hwnd, 0x0112, 0xF060, 0):
+            if succeeded("wm-syscommand-sc-close"):
+                return "wm-syscommand-sc-close"
+        else:
+            errors.append("wm-syscommand-sc-close: PostMessageW failed")
+
         if hwnd and _user32.PostMessageW(hwnd, 0x0010, 0, 0):
-            time.sleep(0.2)
-            return
-        raise RuntimeError(f"Could not close the bound window: {last_error}")
+            if succeeded("wm-close"):
+                return "wm-close"
+        else:
+            errors.append("wm-close: PostMessageW failed")
+
+        try:
+            self.focus()
+            auto.SendKeys("{Alt}{F4}")
+            if succeeded("alt-f4"):
+                return "alt-f4"
+        except Exception as exc:
+            errors.append(f"alt-f4: {exc}")
+
+        raise RuntimeError(
+            f"Close request did not remove window {format_window_id(hwnd)}; "
+            f"attempts: {'; '.join(errors)}"
+        )
+
+    def move_window_by_mouse(self, delta_x: int = 0, delta_y: int = 0,
+                             title_offset: int = 8) -> tuple:
+        """Drag the title bar to move the bound window by a pixel delta.
+
+        Returns (old_left, old_top, new_left, new_top).
+        """
+        win = self.window
+        rect = win.BoundingRectangle
+        offset = max(4, min(int(title_offset), max(4, rect.height() // 3)))
+        width = rect.width()
+        if width >= 400:
+            # Prefer a clear title-bar area away from tabs and window buttons.
+            start_x = rect.right - min(240, width // 4)
+        else:
+            start_x = rect.left + width // 2
+        start = (start_x, rect.top + offset)
+        _mouse_drag(
+            start[0], start[1],
+            start[0] + int(delta_x), start[1] + int(delta_y),
+        )
+        time.sleep(0.2)
+        new_rect = win.BoundingRectangle
+        return (rect.left, rect.top, new_rect.left, new_rect.top)
+
+    def move_window(self, x: int, y: int) -> tuple:
+        """Move the bound window to an absolute position with SetWindowPos.
+
+        Returns (old_left, old_top, new_left, new_top).
+        """
+        win = self.window
+        rect = win.BoundingRectangle
+        hwnd = _get_native_handle(win)
+        if not hwnd:
+            raise RuntimeError("Bound window does not expose a native handle")
+        SWP_NOSIZE = 0x0001
+        SWP_NOZORDER = 0x0004
+        SWP_NOOWNERZORDER = 0x0200
+        SWP_NOACTIVATE = 0x0010
+        flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE
+        ok = _user32.SetWindowPos(hwnd, 0, int(x), int(y), 0, 0, flags)
+        time.sleep(0.2)
+        new_rect = win.BoundingRectangle
+        if not ok:
+            raise RuntimeError(
+                f"SetWindowPos failed for window {format_window_id(hwnd)}"
+            )
+        return (rect.left, rect.top, new_rect.left, new_rect.top)
+
+    def drag_control(self, control: auto.Control, delta_x: int = 0,
+                     delta_y: int = 0) -> tuple:
+        """Drag a control (such as a scrollbar thumb) with the mouse.
+
+        Returns (start_x, start_y, end_x, end_y).
+        """
+        rect = control.BoundingRectangle
+        start = (rect.left + rect.width() // 2, rect.top + rect.height() // 2)
+        _mouse_drag(
+            start[0], start[1],
+            start[0] + int(delta_x), start[1] + int(delta_y),
+        )
+        time.sleep(0.2)
+        new_rect = control.BoundingRectangle
+        end = (
+            new_rect.left + new_rect.width() // 2,
+            new_rect.top + new_rect.height() // 2,
+        )
+        return (start[0], start[1], end[0], end[1])
 
     def scroll_to(self, sidebar_path: tuple, section_class: str) -> None:
         """Scroll a sidebar/scroll area to make a section visible.

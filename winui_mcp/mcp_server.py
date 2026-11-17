@@ -201,13 +201,14 @@ def list_windows(visible_only: bool = True, include_hidden: bool = False) -> dic
 @_tool("Launch Application", open_world=True)
 def launch_app(
     app: str,
-    arguments: str | None = None,
+    arguments: str | list[str] | None = None,
     timeout: float = 12,
 ) -> dict[str, Any]:
     """Launch a supported app and return its bound window_id.
 
     Uses PATH, Windows App Paths, and registered URI protocols; no installation
-    path is returned. arguments can be a URL, document path, or deep-link suffix.
+    path is returned. arguments can be a URL/document/deep-link string or an
+    argument list for flags such as --new-window and --user-data-dir.
     """
     return sk.launch_app(_unbound_driver(), app, arguments, timeout)
 
@@ -250,6 +251,29 @@ def window_action(
     """
     driver = _driver(window_title, process_name, window_class, window_id)
     return sk.window_action(driver, action)
+
+
+@_tool("Move Window")
+def move_window(
+    window_title: str | None = None,
+    process_name: str | None = None,
+    window_class: str | None = None,
+    window_id: str | None = None,
+    x: int | None = None,
+    y: int | None = None,
+    delta_x: int = 0,
+    delta_y: int = 0,
+    method: Literal["mouse", "setwindowpos"] = "mouse",
+) -> dict[str, Any]:
+    """Move the bound window by dragging its title bar or to an absolute position.
+
+    method=mouse drags the title bar by delta_x/delta_y pixels; method=setwindowpos
+    places the top-left corner at absolute x/y. Verify with get_window_state.
+    """
+    driver = _driver(window_title, process_name, window_class, window_id)
+    return sk.move_window(
+        driver, x=x, y=y, delta_x=delta_x, delta_y=delta_y, method=method
+    )
 
 
 @_tool("Reset Window Bindings", destructive=True)
@@ -494,6 +518,28 @@ def right_click(
     if control_class:
         return sk.right_click_by_class(driver, control_class, index, partial)
     return sk._fail("Specify element_id, ref, name, or control_class.")
+
+
+@_tool("Drag Control")
+def drag_control(
+    window_title: str | None = None,
+    process_name: str | None = None,
+    window_class: str | None = None,
+    window_id: str | None = None,
+    delta_x: int = 0,
+    delta_y: int = 0,
+    element_id: str | None = None,
+    ref: str | None = None,
+    name: str | None = None,
+    control_class: str | None = None,
+    index: int = 0,
+    partial: bool = False,
+) -> dict[str, Any]:
+    """Drag a control such as a scrollbar thumb from its center by a pixel delta."""
+    driver = _window_args(window_title, process_name, window_class, window_id)
+    return sk.drag_control(
+        driver, delta_x, delta_y, element_id, ref, name, control_class, index, partial
+    )
 
 
 @_tool("Hover Control", read_only=True)

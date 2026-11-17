@@ -39,6 +39,17 @@ def _toggle_handler(driver: AppDriver, kw: dict) -> dict:
     )
 
 
+def _launch_app_handler(driver: AppDriver, kw: dict) -> dict:
+    """Combine the legacy arguments option with repeatable --arg values."""
+    arguments = kw.get("arguments")
+    extra_arguments = kw.get("extra_arguments") or []
+    if extra_arguments:
+        arguments = ([arguments] if arguments else []) + extra_arguments
+    return sk.launch_app(
+        driver, kw["app"], arguments, kw.get("timeout", 12)
+    )
+
+
 def make_driver(window_title: str = None, window_class: str = None,
                 process_name: str = None, window_id: str = None) -> AppDriver:
     """Create an AppDriver from --window-id, --window, or --processname."""
@@ -68,13 +79,12 @@ COMMANDS = {
         "target_required": False,
     },
     "launch-app": {
-        "func": lambda d, **kw: sk.launch_app(
-            d, kw["app"], kw.get("arguments"), kw.get("timeout", 12)
-        ),
+        "func": _launch_app_handler,
         "desc": "Launch a supported app and bind its window",
         "args": [
             {"name": "--app", "type": str, "required": True, "help": "App id from list-apps"},
             {"name": "--arguments", "type": str, "default": None, "help": "URL, file path, or deep-link suffix"},
+            {"name": "--arg", "action": "append", "dest": "extra_arguments", "default": [], "help": "Additional command-line argument; repeat for multiple flags"},
             {"name": "--timeout", "type": float, "default": 12, "help": "Window discovery timeout"},
         ],
         "target_required": False,
@@ -99,6 +109,21 @@ COMMANDS = {
         "desc": "Focus, minimize, maximize, restore, or close a window",
         "args": [
             {"name": "--action", "dest": "window_action", "type": str, "required": True, "choices": ["focus", "minimize", "maximize", "restore", "close"], "help": "Window action"},
+        ],
+    },
+    "move-window": {
+        "func": lambda d, **kw: sk.move_window(
+            d, x=kw.get("x"), y=kw.get("y"),
+            delta_x=kw.get("delta_x", 0), delta_y=kw.get("delta_y", 0),
+            method=kw.get("method", "mouse"),
+        ),
+        "desc": "Move the window by title-bar mouse drag or absolute position",
+        "args": [
+            {"name": "--x", "type": int, "default": None, "help": "Absolute left position (setwindowpos)"},
+            {"name": "--y", "type": int, "default": None, "help": "Absolute top position (setwindowpos)"},
+            {"name": "--delta-x", "type": int, "default": 0, "help": "Horizontal mouse-drag delta in pixels"},
+            {"name": "--delta-y", "type": int, "default": 0, "help": "Vertical mouse-drag delta in pixels"},
+            {"name": "--method", "type": str, "default": "mouse", "choices": ["mouse", "setwindowpos"], "help": "Move method (default mouse)"},
         ],
     },
     "discover": {
@@ -296,6 +321,24 @@ COMMANDS = {
             {"name": "--ref", "type": str, "default": None, "help": "Control ref from dump-tree/ocr-scan"},
             {"name": "--name", "type": str, "default": None, "help": "Control name"},
             {"name": "--class", "type": str, "default": None, "help": "Control class name", "dest": "class_name"},
+            {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
+            {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
+        ],
+    },
+    "drag": {
+        "func": lambda d, **kw: sk.drag_control(
+            d, kw.get("delta_x", 0), kw.get("delta_y", 0),
+            kw.get("element_id"), kw.get("ref"), kw.get("name"),
+            kw.get("class_name"), kw.get("index", 0), kw.get("partial", True)
+        ),
+        "desc": "Drag a control (such as a scrollbar thumb) by a pixel delta",
+        "args": [
+            {"name": "--delta-x", "type": int, "default": 0, "help": "Horizontal drag delta in pixels"},
+            {"name": "--delta-y", "type": int, "default": 0, "help": "Vertical drag delta in pixels"},
+            {"name": "--element-id", "type": str, "default": None, "help": "Stable id from snapshot (recommended)"},
+            {"name": "--ref", "type": str, "default": None, "help": "Legacy control ref from dump-tree/ocr-scan"},
+            {"name": "--name", "type": str, "default": None, "help": "Control name fallback"},
+            {"name": "--class", "type": str, "default": None, "help": "Control class fallback", "dest": "class_name"},
             {"name": "--index", "type": int, "default": 0, "help": "Nth match (default 0)"},
             {"name": "--exact", "action": "store_false", "dest": "partial", "default": True, "help": "Require an exact name match"},
         ],

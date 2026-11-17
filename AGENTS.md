@@ -33,14 +33,14 @@ Claude Code, OpenCode, Cline, Copilot, Kimi Code, and DeepSeek Harness.
 
 ## Tool surface
 
-The MCP server exposes 31 tools:
+The MCP server exposes 33 tools:
 
 - Applications: `list_apps`, `launch_app`
 - Windows: `list_windows`, `get_window_state`, `focus_window`,
-  `window_action`, `reset_driver`
+  `window_action`, `move_window`, `reset_driver`
 - Observation: `snapshot`, `ocr_scan`, `find_control`, `wait_for`
 - Legacy discovery: `discover`, `describe`, `dump_tree`, `get_control_rect`
-- Mouse: `click`, `double_click`, `right_click`, `hover`
+- Mouse: `click`, `double_click`, `right_click`, `hover`, `drag_control`
 - Scroll: `scroll_up`, `scroll_down`
 - Keyboard: `send_key`, `send_hotkey`, `long_press_key`, `type_text`
 - Values: `get_value`, `get_text`, `set_value`, `toggle`, `combo_select`
@@ -111,6 +111,7 @@ stdio examples.
   - `WINUI_RUN_INTEGRATION=1` for the MCP stdio round trip.
   - `WINUI_RUN_APP_SMOKE=1` for read-only common-app inspection.
   - `WINUI_RUN_APP_LAUNCH=1` for the launch matrix.
+  - `WINUI_RUN_APP_INTERACTION=1` for live Notepad and Calculator interaction flows.
 - Ensure live tests close only windows they created and never terminate unrelated
   user processes.
 - Every MCP tool result should remain structured and machine-readable:
